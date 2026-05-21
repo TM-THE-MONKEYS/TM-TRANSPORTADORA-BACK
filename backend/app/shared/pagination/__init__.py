@@ -27,6 +27,7 @@ class PagedResponse(BaseModel, Generic[T]):
     total: int
     page: int
     size: int
+    page_size: int  # alias for frontend compatibility
     pages: int
     has_next: bool
     has_prev: bool
@@ -44,6 +45,7 @@ class PagedResponse(BaseModel, Generic[T]):
             total=total,
             page=params.page,
             size=params.size,
+            page_size=params.size,
             pages=pages,
             has_next=params.page < pages,
             has_prev=params.page > 1,

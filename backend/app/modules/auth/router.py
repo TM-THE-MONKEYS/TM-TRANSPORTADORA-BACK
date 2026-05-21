@@ -10,13 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
 from app.modules.auth.schemas import (
+    AuthUserResponse,
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    LoginResponse,
     MessageResponse,
     RefreshRequest,
+    RegisterTenantRequest,
     ResetPasswordRequest,
-    TokenResponse,
 )
 from app.modules.auth.service import AuthService
 from app.modules.users.models import User
@@ -29,21 +31,44 @@ def _get_device_info(request: Request) -> str:
     return request.headers.get("User-Agent", "unknown")[:255]
 
 
-@router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
 async def login(
     payload: LoginRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> TokenResponse:
+) -> LoginResponse:
     service = AuthService(db)
     return await service.login(payload.email, payload.password, _get_device_info(request))
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/register-tenant", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+async def register_tenant(
+    payload: RegisterTenantRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> LoginResponse:
+    service = AuthService(db)
+    return await service.register_tenant(
+        payload.tenant_name,
+        payload.admin_name,
+        payload.email,
+        payload.password,
+    )
+
+
+@router.get("/me", response_model=AuthUserResponse)
+async def get_me(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AuthUserResponse:
+    service = AuthService(db)
+    return await service.get_me(current_user)
+
+
+@router.post("/refresh", response_model=LoginResponse)
 async def refresh(
     payload: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> TokenResponse:
+) -> LoginResponse:
     service = AuthService(db)
     return await service.refresh(payload.refresh_token)
 

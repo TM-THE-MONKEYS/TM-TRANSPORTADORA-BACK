@@ -13,8 +13,9 @@ from app.modules.freights.schemas import (
     FreightCostCreate,
     FreightCostRead,
     FreightCreate,
-    FreightListResponse,
-    FreightRead,
+    FreightFrontendListItem,
+    FreightFrontendRead,
+    FreightStatusUpdate,
     FreightUpdate,
 )
 from app.modules.freights.service import FreightService
@@ -25,7 +26,7 @@ from app.shared.pagination import PagedResponse, PageParams
 router = APIRouter(prefix="/freights", tags=["freights"])
 
 
-@router.get("", response_model=PagedResponse[FreightListResponse])
+@router.get("", response_model=PagedResponse[FreightFrontendListItem])
 async def list_freights(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
@@ -35,41 +36,69 @@ async def list_freights(
     client_id: uuid.UUID | None = Query(default=None),
     driver_id: uuid.UUID | None = Query(default=None),
     truck_id: uuid.UUID | None = Query(default=None),
-) -> PagedResponse[FreightListResponse]:
+) -> PagedResponse[FreightFrontendListItem]:
     service = FreightService(db)
     params = PageParams(page=page, size=size)
-    return await service.list(params, status, client_id, driver_id, truck_id)  # type: ignore[return-value]
+    result = await service.list(params, status, client_id, driver_id, truck_id)
+    frontend_items = [FreightFrontendListItem.from_orm(f) for f in result.items]
+    return PagedResponse.create(frontend_items, result.total, params)
 
 
-@router.post("", response_model=FreightRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=FreightFrontendRead, status_code=status.HTTP_201_CREATED)
 async def create_freight(
     payload: FreightCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> FreightRead:
+) -> FreightFrontendRead:
     service = FreightService(db)
-    return await service.create(payload, current_user)  # type: ignore[return-value]
+    freight = await service.create(payload, current_user)
+    return FreightFrontendRead.from_orm(freight)
 
 
-@router.get("/{freight_id}", response_model=FreightRead)
+@router.get("/{freight_id}", response_model=FreightFrontendRead)
 async def get_freight(
     freight_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> FreightRead:
+) -> FreightFrontendRead:
     service = FreightService(db)
-    return await service.get_by_id(freight_id)  # type: ignore[return-value]
+    freight = await service.get_by_id(freight_id)
+    return FreightFrontendRead.from_orm(freight)
 
 
-@router.patch("/{freight_id}", response_model=FreightRead)
+@router.patch("/{freight_id}", response_model=FreightFrontendRead)
 async def update_freight(
     freight_id: uuid.UUID,
     payload: FreightUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> FreightRead:
+) -> FreightFrontendRead:
     service = FreightService(db)
-    return await service.update(freight_id, payload, current_user)  # type: ignore[return-value]
+    freight = await service.update(freight_id, payload, current_user)
+    return FreightFrontendRead.from_orm(freight)
+
+
+@router.post("/{freight_id}/advance-status", response_model=FreightFrontendRead)
+async def advance_freight_status(
+    freight_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FreightFrontendRead:
+    service = FreightService(db)
+    freight = await service.advance_status(freight_id, current_user)
+    return FreightFrontendRead.from_orm(freight)
+
+
+@router.patch("/{freight_id}/status", response_model=FreightFrontendRead)
+async def update_freight_status(
+    freight_id: uuid.UUID,
+    payload: FreightStatusUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FreightFrontendRead:
+    service = FreightService(db)
+    freight = await service.update_status(freight_id, payload.status, current_user)
+    return FreightFrontendRead.from_orm(freight)
 
 
 @router.delete("/{freight_id}", status_code=status.HTTP_204_NO_CONTENT)

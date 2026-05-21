@@ -13,16 +13,36 @@ from app.core.security.jwt import (
 )
 from app.core.security.password import hash_password, verify_password
 from app.modules.auth.repository import RefreshTokenRepository
-from app.modules.auth.schemas import TokenResponse
+from app.modules.auth.schemas import (
+    AuthUserResponse,
+    LoginResponse,
+    TokenResponse,
+    permissions_for_role,
+    role_to_frontend,
+)
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+from app.shared.enums import UserRole
 from app.shared.exceptions.custom import (
     BadRequestException,
+    ConflictException,
     UnauthorizedException,
 )
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
+
+
+def _build_user_response(user: User) -> AuthUserResponse:
+    return AuthUserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.nome,
+        role=role_to_frontend(user.role),
+        tenant_id=str(user.id),  # no multi-tenancy; use user id as tenant ref
+        branch_id=None,
+        permissions=permissions_for_role(user.role),
+    )
 
 
 class AuthService:
@@ -31,9 +51,16 @@ class AuthService:
         self._user_repo = UserRepository(session)
         self._token_repo = RefreshTokenRepository(session)
 
+    def _make_token_response(self, access_token: str, raw_refresh: str) -> TokenResponse:
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=raw_refresh,
+            expires_in=settings.access_token_expire_minutes * 60,
+        )
+
     async def login(
         self, email: str, password: str, device_info: str | None = None
-    ) -> TokenResponse:
+    ) -> LoginResponse:
         user = await self._user_repo.get_by_email(email)
         if not user or not verify_password(password, user.hashed_password):
             raise UnauthorizedException("Credenciais inválidas")
@@ -47,13 +74,50 @@ class AuthService:
         await self._session.commit()
 
         log.info("user_logged_in", user_id=str(user.id), email=user.email)
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=raw_refresh,
-            expires_in=settings.access_token_expire_minutes * 60,
+        return LoginResponse(
+            tokens=self._make_token_response(access_token, raw_refresh),
+            user=_build_user_response(user),
         )
 
-    async def refresh(self, raw_token: str) -> TokenResponse:
+    async def get_me(self, user: User) -> AuthUserResponse:
+        return _build_user_response(user)
+
+    async def register_tenant(
+        self,
+        tenant_name: str,
+        admin_name: str,
+        email: str,
+        password: str,
+    ) -> LoginResponse:
+        existing = await self._user_repo.get_by_email(email)
+        if existing:
+            raise ConflictException("Email já cadastrado")
+
+        from app.core.security.password import hash_password as _hash  # local import to avoid circular
+        hashed = _hash(password)
+        user = User(
+            nome=admin_name,
+            email=email,
+            hashed_password=hashed,
+            role=UserRole.ADMIN,
+            is_active=True,
+        )
+        self._session.add(user)
+        await self._session.flush()
+        await self._session.refresh(user)
+
+        access_token = create_access_token(user.id, user.role)
+        raw_refresh, _ = create_refresh_token()
+        await self._token_repo.create(user.id, raw_refresh, None)
+        await self._session.commit()
+
+        log.info("tenant_registered", email=email, tenant_name=tenant_name)
+        return LoginResponse(
+            tokens=self._make_token_response(access_token, raw_refresh),
+            user=_build_user_response(user),
+        )
+
+    async def refresh(self, raw_token: str) -> LoginResponse:
         token = await self._token_repo.get_by_hash(raw_token)
         if not token or not token.is_valid:
             raise UnauthorizedException("Refresh token inválido ou expirado")
@@ -69,10 +133,9 @@ class AuthService:
         await self._token_repo.create(user.id, raw_new, token.device_info)
         await self._session.commit()
 
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=raw_new,
-            expires_in=settings.access_token_expire_minutes * 60,
+        return LoginResponse(
+            tokens=self._make_token_response(access_token, raw_new),
+            user=_build_user_response(user),
         )
 
     async def logout(self, raw_token: str) -> None:

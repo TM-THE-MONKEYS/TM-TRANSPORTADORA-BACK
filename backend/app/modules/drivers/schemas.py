@@ -79,3 +79,61 @@ class DriverListResponse(BaseModel):
     cnh_expiry: date
     status: DriverStatus
     created_at: datetime
+
+
+# ── Frontend-compatible schemas (English field names) ────────────────────────
+
+class DriverFrontendRead(BaseModel):
+    """Maps backend Portuguese field names to English names expected by the frontend."""
+
+    id: uuid.UUID
+    tenant_id: str = "default"
+    name: str
+    cpf: str | None = None
+    cnh_number: str
+    cnh_category: str
+    cnh_expires_at: str  # ISO date string
+    status: DriverStatus
+    phone: str | None = None
+    photo_url: str | None = None
+    commission_pct: float | None = None
+    created_at: str
+
+    @classmethod
+    def from_orm(cls, driver: object) -> "DriverFrontendRead":
+        return cls(
+            id=driver.id,  # type: ignore[attr-defined]
+            name=driver.nome,  # type: ignore[attr-defined]
+            cpf=driver.cpf,  # type: ignore[attr-defined]
+            cnh_number=driver.cnh,  # type: ignore[attr-defined]
+            cnh_category=driver.cnh_category,  # type: ignore[attr-defined]
+            cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
+            status=driver.status,  # type: ignore[attr-defined]
+            phone=driver.telefone,  # type: ignore[attr-defined]
+            created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
+        )
+
+
+class DriverFrontendListItem(BaseModel):
+    id: uuid.UUID
+    tenant_id: str = "default"
+    name: str
+    cpf: str | None = None
+    cnh_number: str
+    cnh_category: str
+    cnh_expires_at: str
+    status: DriverStatus
+    created_at: str
+
+    @classmethod
+    def from_orm(cls, driver: object) -> "DriverFrontendListItem":
+        return cls(
+            id=driver.id,  # type: ignore[attr-defined]
+            name=driver.nome,  # type: ignore[attr-defined]
+            cpf=driver.cpf,  # type: ignore[attr-defined]
+            cnh_number=driver.cnh,  # type: ignore[attr-defined]
+            cnh_category=driver.cnh_category,  # type: ignore[attr-defined]
+            cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
+            status=driver.status,  # type: ignore[attr-defined]
+            created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
+        )

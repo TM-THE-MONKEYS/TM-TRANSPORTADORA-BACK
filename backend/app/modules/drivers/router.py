@@ -11,8 +11,8 @@ from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
 from app.modules.drivers.schemas import (
     DriverCreate,
-    DriverListResponse,
-    DriverRead,
+    DriverFrontendListItem,
+    DriverFrontendRead,
     DriverUpdate,
 )
 from app.modules.drivers.service import DriverService
@@ -23,7 +23,7 @@ from app.shared.pagination import PagedResponse, PageParams
 router = APIRouter(prefix="/drivers", tags=["drivers"])
 
 
-@router.get("", response_model=PagedResponse[DriverListResponse])
+@router.get("", response_model=PagedResponse[DriverFrontendListItem])
 async def list_drivers(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
@@ -31,41 +31,46 @@ async def list_drivers(
     size: int = Query(default=20, ge=1, le=100),
     status: DriverStatus | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
-) -> PagedResponse[DriverListResponse]:
+) -> PagedResponse[DriverFrontendListItem]:
     service = DriverService(db)
     params = PageParams(page=page, size=size)
-    return await service.list(params, status, search)  # type: ignore[return-value]
+    result = await service.list(params, status, search)
+    frontend_items = [DriverFrontendListItem.from_orm(d) for d in result.items]
+    return PagedResponse.create(frontend_items, result.total, params)
 
 
-@router.post("", response_model=DriverRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DriverFrontendRead, status_code=status.HTTP_201_CREATED)
 async def create_driver(
     payload: DriverCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> DriverRead:
+) -> DriverFrontendRead:
     service = DriverService(db)
-    return await service.create(payload, current_user)  # type: ignore[return-value]
+    driver = await service.create(payload, current_user)
+    return DriverFrontendRead.from_orm(driver)
 
 
-@router.get("/{driver_id}", response_model=DriverRead)
+@router.get("/{driver_id}", response_model=DriverFrontendRead)
 async def get_driver(
     driver_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> DriverRead:
+) -> DriverFrontendRead:
     service = DriverService(db)
-    return await service.get_by_id(driver_id)  # type: ignore[return-value]
+    driver = await service.get_by_id(driver_id)
+    return DriverFrontendRead.from_orm(driver)
 
 
-@router.patch("/{driver_id}", response_model=DriverRead)
+@router.patch("/{driver_id}", response_model=DriverFrontendRead)
 async def update_driver(
     driver_id: uuid.UUID,
     payload: DriverUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> DriverRead:
+) -> DriverFrontendRead:
     service = DriverService(db)
-    return await service.update(driver_id, payload, current_user)  # type: ignore[return-value]
+    driver = await service.update(driver_id, payload, current_user)
+    return DriverFrontendRead.from_orm(driver)
 
 
 @router.delete("/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -72,3 +72,70 @@ class TruckListResponse(BaseModel):
     km_atual: float
     status: TruckStatus
     created_at: datetime
+
+
+# ── Frontend-compatible schemas (English field names) ────────────────────────
+
+class TruckFrontendRead(BaseModel):
+    """Maps backend Portuguese field names to English names expected by the frontend."""
+
+    id: uuid.UUID
+    tenant_id: str = "default"
+    branch_id: str | None = None
+    plate: str
+    renavam: str | None = None
+    brand: str
+    model: str
+    year: int
+    type: str = "cavalo"
+    capacity_kg: float | None = None
+    avg_consumption_km_l: float | None = None
+    status: TruckStatus
+    mileage_km: float
+    insurance_expires_at: str | None = None
+    license_expires_at: str | None = None
+    created_at: datetime
+
+    @classmethod
+    def from_orm(cls, truck: object) -> "TruckFrontendRead":
+        return cls(
+            id=truck.id,  # type: ignore[attr-defined]
+            plate=truck.placa,  # type: ignore[attr-defined]
+            renavam=truck.renavam,  # type: ignore[attr-defined]
+            brand=truck.marca,  # type: ignore[attr-defined]
+            model=truck.modelo,  # type: ignore[attr-defined]
+            year=truck.ano,  # type: ignore[attr-defined]
+            capacity_kg=truck.capacidade_kg,  # type: ignore[attr-defined]
+            avg_consumption_km_l=truck.consumo_km_l,  # type: ignore[attr-defined]
+            status=truck.status,  # type: ignore[attr-defined]
+            mileage_km=truck.km_atual,  # type: ignore[attr-defined]
+            created_at=truck.created_at,  # type: ignore[attr-defined]
+        )
+
+
+class TruckFrontendListItem(BaseModel):
+    id: uuid.UUID
+    tenant_id: str = "default"
+    plate: str
+    brand: str
+    model: str
+    year: int
+    type: str = "cavalo"
+    capacity_kg: float | None = None
+    status: TruckStatus
+    mileage_km: float
+    created_at: datetime
+
+    @classmethod
+    def from_orm(cls, truck: object) -> "TruckFrontendListItem":
+        return cls(
+            id=truck.id,  # type: ignore[attr-defined]
+            plate=truck.placa,  # type: ignore[attr-defined]
+            brand=truck.marca,  # type: ignore[attr-defined]
+            model=truck.modelo,  # type: ignore[attr-defined]
+            year=truck.ano,  # type: ignore[attr-defined]
+            capacity_kg=truck.capacidade_kg,  # type: ignore[attr-defined]
+            status=truck.status,  # type: ignore[attr-defined]
+            mileage_km=truck.km_atual,  # type: ignore[attr-defined]
+            created_at=truck.created_at,  # type: ignore[attr-defined]
+        )

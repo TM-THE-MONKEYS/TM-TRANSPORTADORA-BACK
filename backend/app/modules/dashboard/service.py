@@ -2,22 +2,28 @@
 from __future__ import annotations
 
 import structlog
+from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.dashboard.schemas import (
     DashboardKPIs,
+    DashboardKPIsFrontend,
     FinanceSummary,
     FleetSummary,
+    FreightStatusCount,
     FreightSummary,
+    RevenuePoint,
 )
 from app.modules.drivers.models import Driver
+from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
+from app.modules.freights.models import Freight
 from app.modules.freights.repository import FreightRepository
 from app.modules.maintenance.repository import MaintenanceRepository
 from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
-from app.shared.enums import DriverStatus, UserRole
+from app.shared.enums import DriverStatus, FinanceEntryStatus, FinanceEntryType, FreightStatus, UserRole
 from app.shared.exceptions.custom import ForbiddenException
 
 log = structlog.get_logger(__name__)
@@ -31,7 +37,7 @@ class DashboardService:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR, UserRole.FINANCEIRO):
             raise ForbiddenException("Acesso negado ao dashboard")
 
-    async def get_kpis(self, requesting_user: User) -> DashboardKPIs:
+    async def _get_detailed_kpis(self, requesting_user: User) -> DashboardKPIs:
         self._check_access(requesting_user)
 
         truck_repo = TruckRepository(self._session)
@@ -85,3 +91,46 @@ class DashboardService:
             active_drivers=active_drivers,
             upcoming_maintenance_alerts=len(maintenance_alerts),
         )
+
+    async def get_kpis(self, requesting_user: User) -> DashboardKPIsFrontend:
+        """Return flat KPIs matching the frontend DashboardKpis interface."""
+        detailed = await self._get_detailed_kpis(requesting_user)
+        return DashboardKPIsFrontend.from_detailed(detailed)
+
+    async def get_freights_by_status(self, requesting_user: User) -> list[FreightStatusCount]:
+        self._check_access(requesting_user)
+        result = await self._session.execute(
+            select(Freight.status, func.count(Freight.id).label("count"))
+            .where(Freight.deleted_at.is_(None))
+            .group_by(Freight.status)
+        )
+        return [
+            FreightStatusCount(status=row.status, count=row.count)
+            for row in result.all()
+        ]
+
+    async def get_revenue_series(
+        self, requesting_user: User, days: int = 30
+    ) -> list[RevenuePoint]:
+        self._check_access(requesting_user)
+        since = date.today() - timedelta(days=days)
+
+        result = await self._session.execute(
+            select(
+                func.date(FinanceEntry.created_at).label("day"),
+                func.sum(FinanceEntry.valor).label("revenue"),
+            )
+            .where(
+                FinanceEntry.deleted_at.is_(None),
+                FinanceEntry.tipo == FinanceEntryType.RECEITA,
+                FinanceEntry.status == FinanceEntryStatus.PAGO,
+                func.date(FinanceEntry.created_at) >= since,
+            )
+            .group_by(func.date(FinanceEntry.created_at))
+            .order_by(func.date(FinanceEntry.created_at))
+        )
+
+        return [
+            RevenuePoint(date=str(row.day), revenue=float(row.revenue or 0))
+            for row in result.all()
+        ]

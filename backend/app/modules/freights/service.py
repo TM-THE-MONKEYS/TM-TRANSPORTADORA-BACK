@@ -25,6 +25,14 @@ _ALLOWED_TRANSITIONS: dict[FreightStatus, list[FreightStatus]] = {
     FreightStatus.CANCELADO: [],
 }
 
+_STATUS_FLOW: list[FreightStatus] = [
+    FreightStatus.ORCAMENTO,
+    FreightStatus.CONFIRMADO,
+    FreightStatus.EM_COLETA,
+    FreightStatus.EM_TRANSPORTE,
+    FreightStatus.ENTREGUE,
+]
+
 
 class FreightService:
     def __init__(self, session: AsyncSession) -> None:
@@ -91,6 +99,42 @@ class FreightService:
             raise ForbiddenException("Apenas fretes em orçamento ou cancelados podem ser removidos")
         await self._repo.soft_delete(freight)
         await self._session.commit()
+
+    async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
+        self._check_write_access(requesting_user)
+        freight = await self._repo.get_by_id(freight_id)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        try:
+            idx = _STATUS_FLOW.index(freight.status)
+        except ValueError:
+            raise ForbiddenException(f"Status {freight.status.value} não pode ser avançado")
+        if idx >= len(_STATUS_FLOW) - 1:
+            raise ForbiddenException("Frete já está no status final")
+        next_status = _STATUS_FLOW[idx + 1]
+        freight.status = next_status
+        freight = await self._repo.update(freight)
+        await self._session.commit()
+        log.info("freight_status_advanced", freight_id=str(freight_id), new_status=next_status.value)
+        return freight
+
+    async def update_status(
+        self, freight_id: uuid.UUID, new_status: FreightStatus, requesting_user: User
+    ) -> Freight:
+        self._check_write_access(requesting_user)
+        freight = await self._repo.get_by_id(freight_id)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        allowed = _ALLOWED_TRANSITIONS.get(freight.status, [])
+        if new_status != freight.status and new_status not in allowed:
+            raise ForbiddenException(
+                f"Transição inválida: {freight.status.value} → {new_status.value}"
+            )
+        freight.status = new_status
+        freight = await self._repo.update(freight)
+        await self._session.commit()
+        log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
+        return freight
 
     async def add_cost(self, freight_id: uuid.UUID, data: FreightCostCreate, added_by: User) -> FreightCost:
         self._check_write_access(added_by)

@@ -28,7 +28,7 @@ async def test_create_driver(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["nome"] == "João Motorista"
+    assert data["name"] == "João Motorista"
     assert data["cnh_category"] == "E"
 
 

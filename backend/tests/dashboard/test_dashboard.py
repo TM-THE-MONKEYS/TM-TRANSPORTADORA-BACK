@@ -12,11 +12,11 @@ async def test_dashboard_kpis(
     response = await client.get("/api/v1/dashboard/kpis", headers=admin_headers)
     assert response.status_code == 200
     data = response.json()
-    assert "fleet" in data
-    assert "freights" in data
-    assert "finance" in data
-    assert "active_drivers" in data
-    assert "upcoming_maintenance_alerts" in data
+    assert "freights_in_progress" in data
+    assert "active_trucks" in data
+    assert "available_drivers" in data
+    assert "monthly_revenue_brl" in data
+    assert "maintenance_alerts" in data
 
 
 @pytest.mark.asyncio
