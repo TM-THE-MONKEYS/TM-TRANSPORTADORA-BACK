@@ -1,0 +1,87 @@
+[tool.poetry]
+name = "tm-transportadora-backend"
+version = "0.1.0"
+description = "Backend SaaS para gestão de transportadora de pequeno porte"
+authors = ["TM Transportadora <dev@tmtransportadora.com.br>"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+fastapi = {extras = ["standard"], version = "^0.115"}
+uvicorn = {extras = ["standard"], version = "^0.34"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
+asyncpg = "^0.30"
+alembic = "^1.14"
+pydantic = {extras = ["email"], version = "^2.10"}
+pydantic-settings = "^2.7"
+python-jose = {extras = ["cryptography"], version = "^3.3"}
+passlib = {extras = ["argon2"], version = "^1.7"}
+structlog = "^24.4"
+redis = {extras = ["hiredis"], version = "^5.2"}
+celery = {extras = ["redis"], version = "^5.4"}
+slowapi = "^0.1"
+httpx = "^0.28"
+python-multipart = "^0.0.20"
+python-dateutil = "^2.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-asyncio = "^0.24"
+pytest-cov = "^6.0"
+ruff = "^0.8"
+mypy = "^1.13"
+pre-commit = "^4.0"
+factory-boy = "^3.3"
+faker = "^33.0"
+anyio = {extras = ["trio"], version = "^4.7"}
+types-passlib = "^1.7"
+types-python-jose = "^3.3"
+types-python-dateutil = "^2.9"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # flake8-bugbear
+    "C4",       # flake8-comprehensions
+    "UP",       # pyupgrade
+    "ARG",      # flake8-unused-arguments
+    "SIM",      # flake8-simplify
+    "TCH",      # flake8-type-checking
+    "ANN",      # flake8-annotations
+]
+ignore = ["ANN101", "ANN102", "ANN401", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN", "ARG"]
+"alembic/**/*.py" = ["ANN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+exclude = ["alembic/", "tests/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/tests/*", "*/alembic/*", "*/workers/*"]

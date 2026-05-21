@@ -1,0 +1,81 @@
+"""Authentication and authorization dependencies."""
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+from typing import Annotated
+
+import structlog
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database.session import get_db_session
+from app.core.security.jwt import decode_access_token
+from app.modules.users.models import User
+from app.modules.users.repository import UserRepository
+from app.shared.enums import UserRole
+from app.shared.exceptions.custom import ForbiddenException, UnauthorizedException
+
+log = structlog.get_logger(__name__)
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Session dependency — importable so tests can override it."""
+    async for session in get_db_session():
+        yield session
+
+
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    from uuid import UUID
+
+    if not credentials:
+        raise UnauthorizedException("Token de autenticação não fornecido")
+
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except JWTError:
+        raise UnauthorizedException("Token inválido ou expirado")
+
+    sub = payload.get("sub")
+    if not isinstance(sub, str):
+        raise UnauthorizedException("Token inválido")
+
+    try:
+        user_id = UUID(sub)
+    except ValueError:
+        raise UnauthorizedException("Token inválido")
+
+    repo = UserRepository(db)
+    user = await repo.get_by_id(user_id)
+    if not user:
+        raise UnauthorizedException("Usuário não encontrado")
+
+    return user
+
+
+async def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if not current_user.is_active:
+        raise UnauthorizedException("Conta desativada")
+    return current_user
+
+
+def require_roles(*roles: UserRole):  # type: ignore[no-untyped-def]
+    """Dependency factory that requires one of the specified roles."""
+
+    async def _check_role(
+        current_user: Annotated[User, Depends(get_current_active_user)],
+    ) -> User:
+        if current_user.role not in roles:
+            raise ForbiddenException(
+                f"Acesso negado. Role necessária: {', '.join(r.value for r in roles)}"
+            )
+        return current_user
+
+    return _check_role
