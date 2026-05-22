@@ -16,7 +16,7 @@ class FinanceEntry(SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_finance_entries"
 
     tipo: Mapped[FinanceEntryType] = mapped_column(
-        Enum(FinanceEntryType, name="financeentrytype", create_type=True), nullable=False, index=True
+        Enum(FinanceEntryType, name="financeentrytype", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True
     )
     categoria: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     descricao: Mapped[str] = mapped_column(Text, nullable=False)
@@ -27,7 +27,7 @@ class FinanceEntry(SoftDeleteMixin, BaseModel):
     data_vencimento: Mapped[date | None] = mapped_column(Date, nullable=True)
     data_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[FinanceEntryStatus] = mapped_column(
-        Enum(FinanceEntryStatus, name="financeentrystatus", create_type=True),
+        Enum(FinanceEntryStatus, name="financeentrystatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=FinanceEntryStatus.PENDENTE,
         index=True,

@@ -48,22 +48,24 @@ def create_app() -> FastAPI:
     # Rate limiting
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
-    app.add_middleware(SlowAPIMiddleware)
 
-    # CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    # Custom middleware (order matters: last added = first executed)
+    # Custom middleware (order matters: last added = first executed on request)
     from app.api.v1.middleware.audit_middleware import AuditMiddleware
     from app.api.v1.middleware.logging_middleware import LoggingMiddleware
     app.add_middleware(AuditMiddleware)
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(SlowAPIMiddleware)
+
+    # CORS last = outermost; ensures error responses include Access-Control-Allow-Origin
+    cors_kwargs: dict = {
+        "allow_origins": settings.cors_origins,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if settings.is_development:
+        cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     # Exception handlers
     register_exception_handlers(app)

@@ -5,6 +5,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
@@ -73,11 +74,16 @@ async def update_driver(
     return DriverFrontendRead.from_orm(driver)
 
 
-@router.delete("/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{driver_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def delete_driver(
     driver_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> None:
+) -> Response:
     service = DriverService(db)
     await service.delete(driver_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -27,12 +27,12 @@ class Driver(SoftDeleteMixin, BaseModel):
     email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     cnh: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     cnh_category: Mapped[CNHCategory] = mapped_column(
-        Enum(CNHCategory, name="cnhcategory", create_type=True),
+        Enum(CNHCategory, name="cnhcategory", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
     cnh_expiry: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[DriverStatus] = mapped_column(
-        Enum(DriverStatus, name="driverstatus", create_type=True),
+        Enum(DriverStatus, name="driverstatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=DriverStatus.ATIVO,
     )

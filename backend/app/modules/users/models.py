@@ -15,7 +15,7 @@ class User(SoftDeleteMixin, BaseModel):
     email: Mapped[str] = mapped_column(String(254), nullable=False, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="userrole", create_type=True),
+        Enum(UserRole, name="userrole", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=UserRole.OPERADOR,
     )

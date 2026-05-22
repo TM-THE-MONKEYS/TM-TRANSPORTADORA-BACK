@@ -5,6 +5,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
@@ -101,14 +102,19 @@ async def update_freight_status(
     return FreightFrontendRead.from_orm(freight)
 
 
-@router.delete("/{freight_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{freight_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def delete_freight(
     freight_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> None:
+) -> Response:
     service = FreightService(db)
     await service.delete(freight_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{freight_id}/costs", response_model=FreightCostRead, status_code=status.HTTP_201_CREATED)

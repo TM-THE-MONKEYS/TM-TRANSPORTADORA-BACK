@@ -19,7 +19,7 @@ class Maintenance(SoftDeleteMixin, BaseModel):
         UUID(as_uuid=True), ForeignKey("tm_trucks.id", ondelete="CASCADE"), nullable=False, index=True
     )
     tipo: Mapped[MaintenanceType] = mapped_column(
-        Enum(MaintenanceType, name="maintenancetype", create_type=True), nullable=False
+        Enum(MaintenanceType, name="maintenancetype", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False
     )
     descricao: Mapped[str] = mapped_column(Text, nullable=False)
     km_atual: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -30,7 +30,7 @@ class Maintenance(SoftDeleteMixin, BaseModel):
     data_fim: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_prevista: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[MaintenanceStatus] = mapped_column(
-        Enum(MaintenanceStatus, name="maintenancestatus", create_type=True),
+        Enum(MaintenanceStatus, name="maintenancestatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=MaintenanceStatus.AGENDADA,
     )

@@ -19,7 +19,7 @@ class Truck(SoftDeleteMixin, BaseModel):
     consumo_km_l: Mapped[float | None] = mapped_column(Float, nullable=True)
     km_atual: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     status: Mapped[TruckStatus] = mapped_column(
-        Enum(TruckStatus, name="truckstatus", create_type=True),
+        Enum(TruckStatus, name="truckstatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=TruckStatus.DISPONIVEL,
     )

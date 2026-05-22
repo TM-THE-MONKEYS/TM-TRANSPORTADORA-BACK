@@ -19,7 +19,7 @@ class TrackingUpdate(BaseModel):
         UUID(as_uuid=True), ForeignKey("tm_freights.id", ondelete="CASCADE"), nullable=False, index=True
     )
     status: Mapped[TrackingStatus] = mapped_column(
-        Enum(TrackingStatus, name="trackingstatus", create_type=True), nullable=False
+        Enum(TrackingStatus, name="trackingstatus", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False
     )
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)

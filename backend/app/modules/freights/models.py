@@ -28,7 +28,7 @@ class Freight(SoftDeleteMixin, BaseModel):
     destino: Mapped[dict] = mapped_column(JSON, nullable=False)
     valor_frete: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[FreightStatus] = mapped_column(
-        Enum(FreightStatus, name="freightstatus", create_type=True),
+        Enum(FreightStatus, name="freightstatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=FreightStatus.ORCAMENTO,
         index=True,

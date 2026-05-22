@@ -5,6 +5,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
@@ -79,11 +80,16 @@ async def update_maintenance(
     return await service.update(maintenance_id, payload, current_user)  # type: ignore[return-value]
 
 
-@router.delete("/{maintenance_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{maintenance_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def delete_maintenance(
     maintenance_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> None:
+) -> Response:
     service = MaintenanceService(db)
     await service.delete(maintenance_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
