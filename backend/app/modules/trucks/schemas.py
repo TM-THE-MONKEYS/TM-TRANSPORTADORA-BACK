@@ -4,9 +4,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.shared.enums import TruckStatus
+from app.shared.utils.data_normalization import (
+    TRUCK_CREATE_RULES,
+    TRUCK_UPDATE_RULES,
+    normalize_plate,
+)
+from app.shared.utils.field_aliases import (
+    TRUCK_CREATE_ALIASES,
+    TRUCK_UPDATE_ALIASES,
+    normalize_create_payload,
+    normalize_update_payload,
+)
 
 
 class TruckCreate(BaseModel):
@@ -23,10 +34,39 @@ class TruckCreate(BaseModel):
     cor: str | None = Field(default=None, max_length=50)
     observacoes: str | None = None
 
-    @field_validator("placa")
+    @model_validator(mode="before")
     @classmethod
-    def normalize_placa(cls, v: str) -> str:
-        return v.upper().strip().replace("-", "").replace(" ", "")
+    def accept_frontend_aliases(cls, data: object) -> object:
+        return normalize_create_payload(
+            data,
+            TRUCK_CREATE_ALIASES,
+            required=(
+                ("placa", "Placa"),
+                ("modelo", "Modelo"),
+                ("marca", "Marca"),
+            ),
+            optional_nullable=("renavam", "chassi", "cor", "observacoes", "consumo_km_l"),
+            field_rules=TRUCK_CREATE_RULES,
+        )
+
+    @field_validator("placa", mode="before")
+    @classmethod
+    def normalize_placa_field(cls, v: object) -> object:
+        return normalize_plate(v)
+
+    @field_validator("ano", mode="before")
+    @classmethod
+    def normalize_ano(cls, v: object) -> object:
+        from app.shared.utils.data_normalization import parse_integer_br
+
+        return parse_integer_br(v) if v is not None else v
+
+    @field_validator("capacidade_kg", "consumo_km_l", "km_atual", mode="before")
+    @classmethod
+    def normalize_decimal_fields(cls, v: object) -> object:
+        from app.shared.utils.data_normalization import parse_decimal_br
+
+        return parse_decimal_br(v) if v is not None else v
 
 
 class TruckUpdate(BaseModel):
@@ -38,6 +78,15 @@ class TruckUpdate(BaseModel):
     status: TruckStatus | None = None
     cor: str | None = None
     observacoes: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_frontend_aliases(cls, data: object) -> object:
+        return normalize_update_payload(
+            data,
+            TRUCK_UPDATE_ALIASES,
+            field_rules=TRUCK_UPDATE_RULES,
+        )
 
 
 class TruckRead(BaseModel):

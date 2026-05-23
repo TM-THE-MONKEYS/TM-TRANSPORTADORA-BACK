@@ -4,10 +4,23 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.shared.enums import CNHCategory, DriverStatus
 from app.shared.utils.cpf_cnpj import validate_cpf
+from app.shared.utils.data_normalization import (
+    DRIVER_CREATE_RULES,
+    DRIVER_UPDATE_RULES,
+)
+from app.shared.utils.field_aliases import (
+    DRIVER_CREATE_ALIASES,
+    DRIVER_UPDATE_ALIASES,
+    map_fields,
+    normalize_create_payload,
+    normalize_date_field,
+    normalize_update_payload,
+    strip_ignored_fields,
+)
 
 
 class DriverCreate(BaseModel):
@@ -22,14 +35,30 @@ class DriverCreate(BaseModel):
     observacoes: str | None = None
     user_id: uuid.UUID | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_frontend_aliases(cls, data: object) -> object:
+        normalized = normalize_create_payload(
+            data,
+            DRIVER_CREATE_ALIASES,
+            required=(
+                ("nome", "Nome"),
+                ("cpf", "CPF"),
+                ("cnh", "CNH"),
+            ),
+            optional_nullable=("telefone", "email", "observacoes", "user_id"),
+            field_rules=DRIVER_CREATE_RULES,
+        )
+        if isinstance(normalized, dict):
+            normalize_date_field(normalized, "cnh_expiry")
+        return normalized
+
     @field_validator("cpf")
     @classmethod
     def validate_cpf_field(cls, v: str) -> str:
-        import re
-        clean = re.sub(r"\D", "", v)
-        if not validate_cpf(clean):
+        if not validate_cpf(v):
             raise ValueError("CPF inválido")
-        return clean
+        return v
 
     @field_validator("cnh_expiry")
     @classmethod
@@ -48,6 +77,18 @@ class DriverUpdate(BaseModel):
     cnh_expiry: date | None = None
     status: DriverStatus | None = None
     observacoes: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_frontend_aliases(cls, data: object) -> object:
+        normalized = normalize_update_payload(
+            data,
+            DRIVER_UPDATE_ALIASES,
+            field_rules=DRIVER_UPDATE_RULES,
+        )
+        if isinstance(normalized, dict):
+            normalize_date_field(normalized, "cnh_expiry")
+        return normalized
 
 
 class DriverRead(BaseModel):

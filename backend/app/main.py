@@ -82,8 +82,10 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.dashboard.router import router as dashboard_router
     from app.modules.drivers.router import router as drivers_router
     from app.modules.finance.router import router as finance_router
+    from app.modules.fuel.router import router as fuel_router
     from app.modules.freights.router import router as freights_router
     from app.modules.maintenance.router import router as maintenance_router
+    from app.modules.notifications.router import router as notifications_router
     from app.modules.tracking.router import router as tracking_router
     from app.modules.trucks.router import router as trucks_router
     from app.modules.users.router import router as users_router
@@ -99,6 +101,8 @@ def _register_routers(app: FastAPI) -> None:
         maintenance_router,
         finance_router,
         tracking_router,
+        fuel_router,
+        notifications_router,
         dashboard_router,
     ]:
         app.include_router(router, prefix=prefix)

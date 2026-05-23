@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.utils.data_normalization import (
+    normalize_digits,
+    normalize_plate,
+    normalize_upper_text,
+    parse_decimal_br,
+)
 from app.shared.utils.cpf_cnpj import (
     format_cnpj,
     format_cpf,
@@ -52,6 +58,23 @@ class TestValidateCPFOrCNPJ:
 
     def test_invalid_length(self) -> None:
         assert validate_cpf_or_cnpj("123") is False
+
+
+class TestDataNormalization:
+    def test_normalize_upper_text(self) -> None:
+        assert normalize_upper_text("  joão silva  ") == "JOÃO SILVA"
+
+    def test_normalize_plate(self) -> None:
+        assert normalize_plate("abc-1d23") == "ABC1D23"
+
+    def test_normalize_digits(self) -> None:
+        assert normalize_digits("529.982.247-25") == "52998224725"
+
+    def test_parse_decimal_br_comma(self) -> None:
+        assert parse_decimal_br("30.000,50") == 30000.5
+
+    def test_parse_decimal_br_dot(self) -> None:
+        assert parse_decimal_br("5500.00") == 5500.0
 
 
 class TestPagination:

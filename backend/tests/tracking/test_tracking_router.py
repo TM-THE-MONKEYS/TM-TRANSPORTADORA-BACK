@@ -55,6 +55,7 @@ async def test_add_tracking_update(
     assert response.status_code == 201
     data = response.json()
     assert data["status"] == "em_transito"
+    assert data.get("notification_id") is not None
 
 
 @pytest.mark.asyncio

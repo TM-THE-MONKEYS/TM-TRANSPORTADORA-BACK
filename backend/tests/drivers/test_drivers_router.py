@@ -33,6 +33,48 @@ async def test_create_driver(
 
 
 @pytest.mark.asyncio
+async def test_create_driver_with_frontend_aliases(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    response = await client.post(
+        "/api/v1/drivers",
+        json={
+            "name": "Maria Motorista",
+            "cpf": "39053344705",
+            "cnh_number": "98765432109",
+            "cnh_category": "D",
+            "cnh_expires_at": _future_date(),
+            "phone": "11988887777",
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Maria Motorista"
+    assert data["phone"] == "11988887777"
+
+
+@pytest.mark.asyncio
+async def test_create_driver_null_cpf_returns_clear_error(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    response = await client.post(
+        "/api/v1/drivers",
+        json={
+            "name": "Sem CPF",
+            "cpf": None,
+            "cnh_number": "12345678901",
+            "cnh_category": "E",
+            "cnh_expires_at": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 422
+    detail = str(response.json()["detail"])
+    assert "CPF" in detail
+
+
+@pytest.mark.asyncio
 async def test_create_driver_invalid_cpf(
     client: AsyncClient, operador_headers: dict[str, str], operador_user: object
 ) -> None:

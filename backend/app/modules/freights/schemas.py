@@ -4,9 +4,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.shared.enums import FreightStatus
+from app.shared.utils.data_normalization import (
+    ADDRESS_RULES,
+    FREIGHT_COST_RULES,
+    FREIGHT_CREATE_RULES,
+    FREIGHT_UPDATE_RULES,
+    apply_field_rules,
+    parse_decimal_br,
+)
+from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
 
 
 class AddressPoint(BaseModel):
@@ -17,11 +26,25 @@ class AddressPoint(BaseModel):
     estado: str = Field(max_length=2)
     cep: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_address(cls, data: object) -> object:
+        if isinstance(data, dict):
+            apply_field_rules(data, ADDRESS_RULES)
+        return data
+
 
 class FreightCostCreate(BaseModel):
     tipo: str = Field(max_length=100)
     valor: float = Field(gt=0)
     descricao: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_cost(cls, data: object) -> object:
+        if isinstance(data, dict):
+            apply_field_rules(data, FREIGHT_COST_RULES)
+        return data
 
 
 class FreightCostRead(BaseModel):
@@ -56,6 +79,29 @@ class FreightCreate(BaseModel):
     observacoes: str | None = None
     costs: list[FreightCostCreate] = []
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data: object) -> object:
+        normalized = normalize_create_payload(
+            data,
+            {},
+            required=(),
+            field_rules=FREIGHT_CREATE_RULES,
+            nested_rules={"origem": ADDRESS_RULES, "destino": ADDRESS_RULES},
+        )
+        if isinstance(normalized, dict):
+            costs = normalized.get("costs")
+            if isinstance(costs, list):
+                for cost in costs:
+                    if isinstance(cost, dict):
+                        apply_field_rules(cost, FREIGHT_COST_RULES)
+        return normalized
+
+    @field_validator("valor_frete", "distancia_km", mode="before")
+    @classmethod
+    def normalize_decimal_fields(cls, v: object) -> object:
+        return parse_decimal_br(v) if v is not None else v
+
 
 class FreightUpdate(BaseModel):
     driver_id: uuid.UUID | None = None
@@ -67,6 +113,16 @@ class FreightUpdate(BaseModel):
     data_entrega_real: datetime | None = None
     distancia_km: float | None = Field(default=None, gt=0)
     observacoes: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data: object) -> object:
+        return normalize_update_payload(data, {}, field_rules=FREIGHT_UPDATE_RULES)
+
+    @field_validator("valor_frete", "distancia_km", mode="before")
+    @classmethod
+    def normalize_decimal_fields(cls, v: object) -> object:
+        return parse_decimal_br(v) if v is not None else v
 
 
 class FreightRead(BaseModel):

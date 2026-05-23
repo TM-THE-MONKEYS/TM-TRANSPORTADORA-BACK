@@ -22,6 +22,7 @@
 - [Início Rápido](#início-rápido)
 - [Configuração de Ambiente](#configuração-de-ambiente)
 - [Endpoints da API](#endpoints-da-api)
+- [Documentação para Frontend](./docs/API-FRONTEND.md)
 - [Autenticação e RBAC](#autenticação-e-rbac)
 - [Banco de Dados](#banco-de-dados)
 - [Testes](#testes)

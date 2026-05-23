@@ -21,6 +21,8 @@ import app.modules.freights.models  # noqa: F401
 import app.modules.maintenance.models  # noqa: F401
 import app.modules.finance.models  # noqa: F401
 import app.modules.tracking.models  # noqa: F401
+import app.modules.notifications.models  # noqa: F401
+import app.modules.fuel.models  # noqa: F401
 
 config = context.config
 
@@ -63,15 +65,17 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    import uuid
+    from app.core.database.engine import (
+        _pooler_connect_args,
+        _pooler_engine_url,
+        _uses_transaction_pooler,
+    )
 
+    db_url = _pooler_engine_url(_DB_URL) if _uses_transaction_pooler(_DB_URL) else _DB_URL
     connectable = create_async_engine(
-        _DB_URL,
+        db_url,
         poolclass=pool.NullPool,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_name_func": lambda: f"_alembic_{uuid.uuid4().hex}",
-        },
+        connect_args=_pooler_connect_args() if _uses_transaction_pooler(_DB_URL) else {},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

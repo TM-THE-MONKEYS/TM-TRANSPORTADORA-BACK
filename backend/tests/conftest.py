@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.core.database.base import Base
+
+import app.modules.fuel.models  # noqa: F401
+import app.modules.notifications.models  # noqa: F401 — registra tabelas no metadata
 from app.core.security.jwt import create_access_token
 from app.core.security.password import hash_password
 from app.main import create_app
@@ -55,7 +58,7 @@ async def db_session(engine: Any) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest_asyncio.fixture
 async def app(db_session: AsyncSession) -> FastAPI:
-    from app.api.v1.dependencies.auth import get_db
+    from app.api.v1.dependencies.database import get_db
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
@@ -122,3 +125,28 @@ def admin_headers(admin_token: str) -> dict[str, str]:
 @pytest_asyncio.fixture
 def operador_headers(operador_token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {operador_token}"}
+
+
+@pytest_asyncio.fixture
+async def motorista_user(db_session: AsyncSession) -> User:
+    user = User(
+        nome="Motorista Test",
+        email="motorista@test.com",
+        hashed_password=hash_password("Motorista@123!"),
+        role=UserRole.MOTORISTA,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture
+def motorista_token(motorista_user: User) -> str:
+    return create_access_token(motorista_user.id, motorista_user.role)
+
+
+@pytest_asyncio.fixture
+def motorista_headers(motorista_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {motorista_token}"}

@@ -4,9 +4,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.shared.enums import UserRole
+from app.shared.utils.data_normalization import USER_CREATE_RULES, USER_UPDATE_RULES
+from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
 
 
 class UserCreate(BaseModel):
@@ -15,6 +17,16 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8)
     role: UserRole = UserRole.OPERADOR
     is_active: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data: object) -> object:
+        return normalize_create_payload(
+            data,
+            {},
+            required=(("nome", "Nome"), ("email", "Email")),
+            field_rules=USER_CREATE_RULES,
+        )
 
     @field_validator("password")
     @classmethod
@@ -33,6 +45,11 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     role: UserRole | None = None
     is_active: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data: object) -> object:
+        return normalize_update_payload(data, {}, field_rules=USER_UPDATE_RULES)
 
 
 class UserRead(BaseModel):

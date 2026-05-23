@@ -21,7 +21,7 @@ class TruckStatus(StrEnum):
 class DriverStatus(StrEnum):
     ATIVO = "ativo"
     INATIVO = "inativo"
-    SUSPENS0 = "suspenso"
+    SUSPENSO = "suspenso"
     FERIAS = "ferias"
 
 
@@ -65,6 +65,29 @@ class TrackingStatus(StrEnum):
     TENTATIVA_ENTREGA = "tentativa_entrega"
     ENTREGUE = "entregue"
     DEVOLVIDO = "devolvido"
+
+
+class NotificationType(StrEnum):
+    TRACKING_OCCURRENCE = "tracking_occurrence"
+    FUEL_REFILL = "fuel_refill"
+
+
+# Frete em viagem — motorista pode registrar abastecimento/ocorrências
+ACTIVE_FREIGHT_STATUSES: frozenset[FreightStatus] = frozenset({
+    FreightStatus.CONFIRMADO,
+    FreightStatus.EM_COLETA,
+    FreightStatus.EM_TRANSPORTE,
+})
+
+
+TRACKING_STATUS_LABELS: dict[str, str] = {
+    TrackingStatus.COLETADO: "Coletado",
+    TrackingStatus.EM_TRANSITO: "Em trânsito",
+    TrackingStatus.SAIU_PARA_ENTREGA: "Saiu para entrega",
+    TrackingStatus.TENTATIVA_ENTREGA: "Tentativa de entrega",
+    TrackingStatus.ENTREGUE: "Entregue",
+    TrackingStatus.DEVOLVIDO: "Devolvido",
+}
 
 
 class CNHCategory(StrEnum):

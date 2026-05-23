@@ -14,6 +14,7 @@ from app.core.config.settings import get_settings
 from app.core.database.engine import get_engine
 from app.core.database.session import AsyncSessionLocal
 from app.core.security.password import hash_password
+import app.modules.auth.models  # noqa: F401 — registra RefreshToken para o mapper User
 from app.modules.users.models import User
 from app.shared.enums import UserRole
 

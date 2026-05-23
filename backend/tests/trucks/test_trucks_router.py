@@ -28,6 +28,52 @@ async def test_create_truck(
 
 
 @pytest.mark.asyncio
+async def test_create_truck_with_br_decimal_format(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    response = await client.post(
+        "/api/v1/trucks",
+        json={
+            "placa": "br1d23",
+            "modelo": "fh 540",
+            "marca": "volvo",
+            "ano": 2022,
+            "capacidade_kg": "30.000,50",
+            "consumo_km_l": "2,5",
+            "km_atual": "150.000",
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["plate"] == "BR1D23"
+    assert data["brand"] == "VOLVO"
+    assert data["capacity_kg"] == 30000.5
+
+
+@pytest.mark.asyncio
+async def test_create_truck_with_frontend_aliases(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    response = await client.post(
+        "/api/v1/trucks",
+        json={
+            "plate": "FR0NT01",
+            "model": "R450",
+            "brand": "Scania",
+            "year": 2021,
+            "capacity_kg": 28000.0,
+            "mileage_km": 120000,
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["plate"] == "FR0NT01"
+    assert data["brand"] == "Scania"
+
+
+@pytest.mark.asyncio
 async def test_create_truck_duplicate_placa(
     client: AsyncClient, operador_headers: dict[str, str], operador_user: object
 ) -> None:

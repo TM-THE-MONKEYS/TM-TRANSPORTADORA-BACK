@@ -90,14 +90,21 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def sqlalchemy_exception_handler(
         request: Request, exc: SQLAlchemyError
     ) -> JSONResponse:
+        settings = get_settings()
         log.error(
             "database_error",
             exc_type=type(exc).__name__,
+            exc_message=str(exc.__cause__ or exc),
             path=request.url.path,
+        )
+        detail = (
+            str(exc.__cause__ or exc)
+            if settings.is_development
+            else "Banco de dados indisponível. Verifique DATABASE_URL no .env do backend."
         )
         return _error_response(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Banco de dados indisponível. Verifique DATABASE_URL no .env do backend.",
+            detail,
             request,
         )
 

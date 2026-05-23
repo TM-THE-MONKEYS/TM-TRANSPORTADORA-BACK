@@ -1,7 +1,6 @@
 """Authentication and authorization dependencies."""
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Annotated
 
 import structlog
@@ -10,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database.session import get_db_session
+from app.api.v1.dependencies.database import get_db
 from app.core.security.jwt import decode_access_token
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
@@ -19,12 +18,6 @@ from app.shared.exceptions.custom import ForbiddenException, UnauthorizedExcepti
 
 log = structlog.get_logger(__name__)
 _bearer = HTTPBearer(auto_error=False)
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Session dependency — importable so tests can override it."""
-    async for session in get_db_session():
-        yield session
 
 
 async def get_current_user(
