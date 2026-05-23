@@ -129,3 +129,108 @@ async def test_motorista_registers_fuel_without_driver_id(
     assert response.status_code == 201
     assert response.json()["litros"] == 80.0
     assert response.json()["valor_total"] == 640.0
+
+
+@pytest.mark.asyncio
+async def test_eligible_freights_excludes_entregue_for_motorista(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    freight, driver, motorista_user = await _setup_freight_with_driver(db_session)
+    freight_entregue = Freight(
+        client_id=freight.client_id,
+        driver_id=driver.id,
+        origem={"cidade": "SÃO PAULO", "estado": "SP"},
+        destino={"cidade": "RIO", "estado": "RJ"},
+        valor_frete=3000.0,
+        status=FreightStatus.ENTREGUE,
+    )
+    db_session.add(freight_entregue)
+    await db_session.commit()
+
+    token = create_access_token(motorista_user.id, motorista_user.role)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.get("/api/v1/fuel/eligible-freights", headers=headers)
+    assert response.status_code == 200
+    ids = {item["freight_id"] for item in response.json()}
+    assert str(freight.id) in ids
+    assert str(freight_entregue.id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_motorista_cannot_fuel_other_drivers_freight(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    freight, _, _ = await _setup_freight_with_driver(db_session)
+
+    other_motorista = User(
+        nome="Outro Motorista",
+        email="outro.motorista.fuel@test.com",
+        hashed_password=hash_password("Motorista@123!"),
+        role=UserRole.MOTORISTA,
+        is_active=True,
+    )
+    db_session.add(other_motorista)
+    await db_session.flush()
+
+    other_driver = Driver(
+        user_id=other_motorista.id,
+        nome="OUTRO MOTORISTA",
+        cpf="52998224725",
+        cnh="98765432109",
+        cnh_category=CNHCategory.C,
+        cnh_expiry=date(2030, 12, 31),
+        status=DriverStatus.ATIVO,
+    )
+    db_session.add(other_driver)
+    await db_session.commit()
+    await db_session.refresh(other_motorista)
+
+    token = create_access_token(other_motorista.id, other_motorista.role)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.post(
+        "/api/v1/fuel",
+        json={
+            "freight_id": str(freight.id),
+            "litros": 50,
+            "valor_total": "400,00",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_operador_cannot_use_wrong_driver_id_on_fuel(
+    client: AsyncClient,
+    operador_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    freight, driver, _ = await _setup_freight_with_driver(db_session)
+
+    other_driver = Driver(
+        nome="MOTORISTA EXTRA",
+        cpf="11144477735",
+        cnh="11122233344",
+        cnh_category=CNHCategory.C,
+        cnh_expiry=date(2030, 12, 31),
+        status=DriverStatus.ATIVO,
+    )
+    db_session.add(other_driver)
+    await db_session.commit()
+    await db_session.refresh(other_driver)
+
+    response = await client.post(
+        "/api/v1/fuel",
+        json={
+            "freight_id": str(freight.id),
+            "driver_id": str(other_driver.id),
+            "litros": 50,
+            "valor_total": "400,00",
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 400

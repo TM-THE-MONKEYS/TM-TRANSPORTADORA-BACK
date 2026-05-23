@@ -87,6 +87,7 @@ class FinanceEntryListResponse(BaseModel):
     categoria: str
     descricao: str
     valor: float
+    freight_id: uuid.UUID | None = None
     status: FinanceEntryStatus
     data_vencimento: date | None
     created_at: datetime

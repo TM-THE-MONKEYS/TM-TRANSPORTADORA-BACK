@@ -15,6 +15,7 @@ from app.modules.fuel.models import FuelRefill
 from app.modules.fuel.repository import FuelRepository
 from app.modules.fuel.schemas import (
     ActiveFreightContext,
+    EligibleFreightItem,
     FuelFreightSummary,
     FuelRefillCreate,
     FuelRefillCreatedResponse,
@@ -22,6 +23,7 @@ from app.modules.fuel.schemas import (
 )
 from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.trucks.models import Truck
+from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
 from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
@@ -30,6 +32,9 @@ from app.shared.pagination import PagedResponse, PageParams
 log = structlog.get_logger(__name__)
 
 _WRITE_ROLES = frozenset({UserRole.ADMIN, UserRole.OPERADOR, UserRole.MOTORISTA})
+_READ_ELIGIBLE_ROLES = frozenset(
+    {UserRole.ADMIN, UserRole.OPERADOR, UserRole.MOTORISTA, UserRole.FINANCEIRO}
+)
 
 
 class FuelService:
@@ -42,35 +47,53 @@ class FuelService:
         if user.role not in _WRITE_ROLES:
             raise ForbiddenException("Acesso negado")
 
+    async def _get_driver_id_for_user(self, user: User) -> uuid.UUID | None:
+        result = await self._session.execute(
+            select(Driver.id).where(Driver.user_id == user.id)
+        )
+        return result.scalar_one_or_none()
+
     async def _resolve_driver_id(
         self, freight: Freight, payload_driver_id: uuid.UUID | None, user: User
     ) -> uuid.UUID:
-        driver_id = payload_driver_id or freight.driver_id
-        if not driver_id:
+        if not freight.driver_id:
             raise BadRequestException(
                 "Frete sem motorista vinculado. Atribua um motorista antes do abastecimento."
             )
 
-        if user.role == UserRole.MOTORISTA:
-            result = await self._session.execute(
-                select(Driver.id).where(Driver.user_id == user.id)
+        if payload_driver_id and payload_driver_id != freight.driver_id:
+            raise BadRequestException(
+                "O abastecimento deve ser registrado pelo motorista vinculado ao frete"
             )
-            my_driver_id = result.scalar_one_or_none()
-            if not my_driver_id or my_driver_id != driver_id:
-                raise ForbiddenException("Motorista só pode registrar abastecimento do próprio frete")
-            if freight.driver_id and freight.driver_id != my_driver_id:
-                raise ForbiddenException("Este frete não está atribuído a você")
 
-        if freight.driver_id and driver_id != freight.driver_id:
-            raise BadRequestException("Motorista informado não corresponde ao frete")
+        if user.role == UserRole.MOTORISTA:
+            my_driver_id = await self._get_driver_id_for_user(user)
+            if not my_driver_id or freight.driver_id != my_driver_id:
+                raise ForbiddenException(
+                    "Somente o motorista do frete pode registrar abastecimento"
+                )
 
-        return driver_id
+        return freight.driver_id
 
     async def _check_freight_active_for_refill(self, freight: Freight) -> None:
         if freight.status not in ACTIVE_FREIGHT_STATUSES:
             raise BadRequestException(
                 "Abastecimento só pode ser registrado em frete confirmado, em coleta ou em transporte"
             )
+
+    async def _sync_truck_km(self, truck_id: uuid.UUID, km: float) -> None:
+        """Atualiza km_atual do caminhão na frota (registro pelo motorista no abastecimento)."""
+        truck = await self._session.get(Truck, truck_id)
+        if not truck or truck.deleted_at is not None:
+            raise BadRequestException("Caminhão vinculado ao frete não encontrado na frota")
+        if km <= 0:
+            raise BadRequestException("Informe a quilometragem atual do veículo")
+        current = float(truck.km_atual or 0)
+        if km < current:
+            raise BadRequestException(
+                f"A quilometragem ({km:,.0f} km) não pode ser menor que a da frota ({current:,.0f} km)"
+            )
+        truck.km_atual = km
 
     async def _enrich_read(self, refill: FuelRefill) -> FuelRefillRead:
         driver_name: str | None = None
@@ -154,6 +177,19 @@ class FuelService:
         )
         refill = await self._repo.create(refill)
 
+        if truck_id:
+            if data.km_atual is None:
+                raise BadRequestException(
+                    "Informe a quilometragem atual do caminhão para atualizar a frota"
+                )
+            await self._sync_truck_km(truck_id, float(data.km_atual))
+        elif data.km_atual is not None:
+            raise BadRequestException("Frete sem caminhão vinculado — quilometragem não aplicada")
+
+        from app.modules.finance.freight_sync import create_fuel_expense
+
+        await create_fuel_expense(self._session, refill, cost_desc)
+
         notification_service = NotificationService(self._session)
         notification = await notification_service.create_for_fuel_refill(refill, author)
 
@@ -204,6 +240,28 @@ class FuelService:
             if driver_user_id != user.id:
                 raise ForbiddenException("Acesso negado a este frete")
 
+    async def list_all(
+        self,
+        params: PageParams,
+        user: User,
+    ) -> PagedResponse[FuelRefillRead]:
+        if user.role not in _READ_ELIGIBLE_ROLES:
+            raise ForbiddenException("Acesso negado")
+
+        driver_filter: uuid.UUID | None = None
+        if user.role == UserRole.MOTORISTA:
+            driver_filter = await self._get_driver_id_for_user(user)
+            if not driver_filter:
+                return PagedResponse.create([], 0, params)
+
+        items, total = await self._repo.list_all(
+            driver_id=driver_filter,
+            limit=params.size,
+            offset=params.offset,
+        )
+        reads = [await self._enrich_read(r) for r in items]
+        return PagedResponse.create(reads, total, params)
+
     async def list_by_freight(
         self,
         freight_id: uuid.UUID,
@@ -252,17 +310,9 @@ class FuelService:
             refills_count=count,
         )
 
-    async def get_active_freight_context(self, user: User) -> ActiveFreightContext:
-        if user.role != UserRole.MOTORISTA:
-            raise ForbiddenException("Disponível apenas para motoristas")
-
-        freight_id = await self._repo.get_active_freight_for_driver_user(user.id)
-        if not freight_id:
-            raise NotFoundException("Nenhum frete em andamento encontrado para este motorista")
-
-        freight = await self._freight_repo.get_by_id(freight_id)
-        if not freight or not freight.driver_id:
-            raise NotFoundException("Frete em andamento inválido")
+    async def _build_freight_context(self, freight: Freight) -> ActiveFreightContext:
+        if not freight.driver_id:
+            raise NotFoundException("Frete sem motorista vinculado")
 
         driver = await self._session.get(Driver, freight.driver_id)
         if not driver:
@@ -288,3 +338,30 @@ class FuelService:
             destination_city=destino.get("cidade", ""),
             destination_state=destino.get("estado", ""),
         )
+
+    async def list_eligible_freights(self, user: User) -> list[EligibleFreightItem]:
+        if user.role not in _READ_ELIGIBLE_ROLES:
+            raise ForbiddenException("Acesso negado")
+
+        driver_filter: uuid.UUID | None = None
+        if user.role == UserRole.MOTORISTA:
+            driver_filter = await self._get_driver_id_for_user(user)
+            if not driver_filter:
+                return []
+
+        fretes, _ = await self._repo.list_eligible_freights(driver_id=driver_filter)
+        return [EligibleFreightItem(**(await self._build_freight_context(f)).model_dump()) for f in fretes]
+
+    async def get_active_freight_context(self, user: User) -> ActiveFreightContext:
+        if user.role != UserRole.MOTORISTA:
+            raise ForbiddenException("Disponível apenas para motoristas")
+
+        freight_id = await self._repo.get_active_freight_for_driver_user(user.id)
+        if not freight_id:
+            raise NotFoundException("Nenhum frete em andamento encontrado para este motorista")
+
+        freight = await self._freight_repo.get_by_id(freight_id)
+        if not freight:
+            raise NotFoundException("Frete em andamento inválido")
+
+        return await self._build_freight_context(freight)

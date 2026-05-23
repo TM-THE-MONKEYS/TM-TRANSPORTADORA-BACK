@@ -11,6 +11,7 @@ from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
 from app.modules.fuel.schemas import (
     ActiveFreightContext,
+    EligibleFreightItem,
     FuelFreightSummary,
     FuelRefillCreate,
     FuelRefillCreatedResponse,
@@ -38,6 +39,19 @@ async def register_fuel_refill(
     return await service.create(payload, current_user)
 
 
+@router.get("/eligible-freights", response_model=list[EligibleFreightItem])
+async def list_eligible_freights_for_fuel(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> list[EligibleFreightItem]:
+    """Fretes elegíveis para abastecimento (sem concluídos/cancelados/orçamento).
+
+    Motorista: apenas fretes em que está vinculado. Admin/operador: todos em viagem.
+    """
+    service = FuelService(db)
+    return await service.list_eligible_freights(current_user)
+
+
 @router.get("/active-freight", response_model=ActiveFreightContext)
 async def get_active_freight_for_driver(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -56,6 +70,18 @@ async def get_freight_fuel_summary(
 ) -> FuelFreightSummary:
     service = FuelService(db)
     return await service.get_freight_summary(freight_id, current_user)
+
+
+@router.get("", response_model=PagedResponse[FuelRefillRead])
+async def list_fuel_refills(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> PagedResponse[FuelRefillRead]:
+    """Histórico geral de abastecimentos (admin/operador: todos; motorista: só os seus)."""
+    service = FuelService(db)
+    return await service.list_all(PageParams(page=page, size=size), current_user)
 
 
 @router.get("/freight/{freight_id}", response_model=PagedResponse[FuelRefillRead])

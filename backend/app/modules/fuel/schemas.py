@@ -119,3 +119,7 @@ class ActiveFreightContext(BaseModel):
     origin_state: str
     destination_city: str
     destination_state: str
+
+
+class EligibleFreightItem(ActiveFreightContext):
+    """Frete elegível para abastecimento (exclui entregue, cancelado e orçamento)."""

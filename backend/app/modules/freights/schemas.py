@@ -50,6 +50,7 @@ class FreightCostCreate(BaseModel):
 class FreightCostRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    freight_id: uuid.UUID
     tipo: str
     valor: float
     descricao: str | None

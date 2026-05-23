@@ -52,6 +52,9 @@ class FreightService:
         freight = await self._repo.create(freight)
         for cost_data in data.costs:
             await self._repo.add_cost(freight.id, cost_data.tipo, cost_data.valor, cost_data.descricao)
+        from app.modules.finance.freight_sync import ensure_freight_revenue
+
+        await ensure_freight_revenue(self._session, freight)
         await self._session.commit()
         log.info("freight_created", freight_id=str(freight.id), client_id=str(data.client_id))
         return freight
@@ -136,11 +139,20 @@ class FreightService:
         log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
         return freight
 
+    async def list_costs(self, freight_id: uuid.UUID) -> list[FreightCost]:
+        freight = await self._repo.get_by_id(freight_id)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        return await self._repo.list_costs_by_freight(freight_id)
+
     async def add_cost(self, freight_id: uuid.UUID, data: FreightCostCreate, added_by: User) -> FreightCost:
         self._check_write_access(added_by)
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
         cost = await self._repo.add_cost(freight_id, data.tipo, data.valor, data.descricao)
+        from app.modules.finance.freight_sync import create_cost_expense
+
+        await create_cost_expense(self._session, cost)
         await self._session.commit()
         return cost

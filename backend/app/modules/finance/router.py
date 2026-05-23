@@ -26,6 +26,16 @@ from app.shared.pagination import PagedResponse, PageParams
 router = APIRouter(prefix="/finance", tags=["finance"])
 
 
+@router.post("/sync-from-freights")
+async def sync_finance_from_freights(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> dict[str, int]:
+    """Gera receitas/despesas a partir de fretes, abastecimentos e custos existentes."""
+    service = FinanceService(db)
+    return await service.sync_from_freights(current_user)
+
+
 @router.get("/cash-flow", response_model=CashFlowResponse)
 async def get_cash_flow(
     db: Annotated[AsyncSession, Depends(get_db)],

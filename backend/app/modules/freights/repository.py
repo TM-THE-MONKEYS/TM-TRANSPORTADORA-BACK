@@ -73,6 +73,14 @@ class FreightRepository:
         freight.soft_delete()
         await self._session.flush()
 
+    async def list_costs_by_freight(self, freight_id: uuid.UUID) -> list[FreightCost]:
+        result = await self._session.execute(
+            select(FreightCost)
+            .where(FreightCost.freight_id == freight_id)
+            .order_by(FreightCost.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def add_cost(self, freight_id: uuid.UUID, tipo: str, valor: float, descricao: str | None = None) -> FreightCost:
         cost = FreightCost(freight_id=freight_id, tipo=tipo, valor=valor, descricao=descricao)
         self._session.add(cost)

@@ -117,6 +117,18 @@ async def delete_freight(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/{freight_id}/costs", response_model=list[FreightCostRead])
+async def list_freight_costs(
+    freight_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> list[FreightCostRead]:
+    """Custos do frete (inclui combustível gerado por abastecimentos)."""
+    service = FreightService(db)
+    costs = await service.list_costs(freight_id)
+    return costs
+
+
 @router.post("/{freight_id}/costs", response_model=FreightCostRead, status_code=status.HTTP_201_CREATED)
 async def add_freight_cost(
     freight_id: uuid.UUID,

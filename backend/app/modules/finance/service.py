@@ -21,18 +21,25 @@ from app.shared.pagination import PagedResponse, PageParams
 
 log = structlog.get_logger(__name__)
 
+_READ_ROLES = frozenset({UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.OPERADOR})
+_WRITE_ROLES = frozenset({UserRole.ADMIN, UserRole.FINANCEIRO})
+
 
 class FinanceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repo = FinanceRepository(session)
 
-    def _check_access(self, user: User) -> None:
-        if user.role not in (UserRole.ADMIN, UserRole.FINANCEIRO):
+    def _check_read_access(self, user: User) -> None:
+        if user.role not in _READ_ROLES:
             raise ForbiddenException("Acesso restrito ao módulo financeiro")
 
+    def _check_write_access(self, user: User) -> None:
+        if user.role not in _WRITE_ROLES:
+            raise ForbiddenException("Acesso restrito para alterar lançamentos financeiros")
+
     async def create(self, data: FinanceEntryCreate, created_by: User) -> FinanceEntry:
-        self._check_access(created_by)
+        self._check_write_access(created_by)
         entry = FinanceEntry(**data.model_dump())
         entry = await self._repo.create(entry)
         await self._session.commit()
@@ -40,7 +47,7 @@ class FinanceService:
         return entry
 
     async def get_by_id(self, entry_id: uuid.UUID, requesting_user: User) -> FinanceEntry:
-        self._check_access(requesting_user)
+        self._check_read_access(requesting_user)
         entry = await self._repo.get_by_id(entry_id)
         if not entry:
             raise NotFoundException("Lançamento não encontrado")
@@ -57,14 +64,14 @@ class FinanceService:
         vencimento_from: date | None = None,
         vencimento_to: date | None = None,
     ) -> PagedResponse[FinanceEntry]:
-        self._check_access(requesting_user)
+        self._check_read_access(requesting_user)
         items, total = await self._repo.list(
             params, tipo, status, categoria, freight_id, vencimento_from, vencimento_to
         )
         return PagedResponse.create(items, total, params)
 
     async def update(self, entry_id: uuid.UUID, data: FinanceEntryUpdate, updated_by: User) -> FinanceEntry:
-        self._check_access(updated_by)
+        self._check_write_access(updated_by)
         entry = await self._repo.get_by_id(entry_id)
         if not entry:
             raise NotFoundException("Lançamento não encontrado")
@@ -75,7 +82,7 @@ class FinanceService:
         return entry
 
     async def delete(self, entry_id: uuid.UUID, deleted_by: User) -> None:
-        self._check_access(deleted_by)
+        self._check_write_access(deleted_by)
         entry = await self._repo.get_by_id(entry_id)
         if not entry:
             raise NotFoundException("Lançamento não encontrado")
@@ -83,6 +90,16 @@ class FinanceService:
         await self._session.commit()
 
     async def get_cash_flow(self, requesting_user: User) -> CashFlowResponse:
-        self._check_access(requesting_user)
+        self._check_read_access(requesting_user)
         summary = await self._repo.get_cash_flow_summary()
         return CashFlowResponse(**summary)
+
+    async def sync_from_freights(self, requesting_user: User) -> dict[str, int]:
+        """Importa receitas de fretes e despesas (abastecimentos/custos) para o financeiro."""
+        self._check_write_access(requesting_user)
+        from app.modules.finance.freight_sync import sync_all_from_freights
+
+        stats = await sync_all_from_freights(self._session)
+        await self._session.commit()
+        log.info("finance_sync_from_freights", **stats)
+        return stats

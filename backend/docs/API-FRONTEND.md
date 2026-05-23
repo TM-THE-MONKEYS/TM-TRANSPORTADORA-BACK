@@ -894,7 +894,18 @@ Registros de abastecimento **vinculados ao frete e motorista** em viagem. Valore
 - Gera notificação para admin/operador/financeiro
 - Mantém `freight_id`, `driver_id` e `truck_id` (do frete) em `tm_fuel_refills`
 
-Escrita: **admin**, **operador** ou **motorista** (motorista só no próprio frete).
+Escrita: **admin**, **operador** ou **motorista** (motorista só no próprio frete; `driver_id` deve ser o motorista vinculado ao frete).
+
+### GET `/fuel/eligible-freights` — Fretes para seleção no abastecimento
+
+Lista fretes **em viagem** (`confirmado`, `em_coleta`, `em_transporte`). **Não inclui** entregues, cancelados nem orçamento.
+
+- **Motorista:** apenas fretes em que está vinculado como `driver_id`
+- **Admin/operador:** todos os fretes elegíveis com motorista atribuído
+
+**Resposta 200:** array de `ActiveFreightContext` (mesmos campos do frete ativo).
+
+---
 
 ### GET `/fuel/active-freight` — Frete em andamento (motorista)
 

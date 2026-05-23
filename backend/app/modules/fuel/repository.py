@@ -6,8 +6,9 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.freights.models import Freight
 from app.modules.fuel.models import FuelRefill
-from app.shared.enums import ACTIVE_FREIGHT_STATUSES, FreightStatus
+from app.shared.enums import ACTIVE_FREIGHT_STATUSES
 
 
 class FuelRepository:
@@ -25,6 +26,31 @@ class FuelRepository:
             select(FuelRefill).where(FuelRefill.id == refill_id)
         )
         return result.scalar_one_or_none()
+
+    async def list_all(
+        self,
+        *,
+        driver_id: uuid.UUID | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[FuelRefill], int]:
+        base = (
+            select(FuelRefill)
+            .join(Freight, FuelRefill.freight_id == Freight.id)
+            .where(Freight.deleted_at.is_(None))
+        )
+        if driver_id is not None:
+            base = base.where(FuelRefill.driver_id == driver_id)
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar_one()
+
+        result = await self._session.execute(
+            base.order_by(FuelRefill.data_abastecimento.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all()), total
 
     async def list_by_freight(
         self,
@@ -79,3 +105,26 @@ class FuelRepository:
             .limit(1)
         )
         return freight_result.scalar_one_or_none()
+
+    async def list_eligible_freights(
+        self,
+        *,
+        driver_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Freight], int]:
+        base = select(Freight).where(
+            Freight.status.in_(ACTIVE_FREIGHT_STATUSES),
+            Freight.deleted_at.is_(None),
+            Freight.driver_id.isnot(None),
+        )
+        if driver_id is not None:
+            base = base.where(Freight.driver_id == driver_id)
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar_one()
+
+        result = await self._session.execute(
+            base.order_by(Freight.updated_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
