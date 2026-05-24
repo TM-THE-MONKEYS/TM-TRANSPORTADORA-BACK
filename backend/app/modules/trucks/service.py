@@ -17,6 +17,7 @@ from app.shared.exceptions.custom import (
     NotFoundException,
 )
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import assert_catalog_read_access
 
 log = structlog.get_logger(__name__)
 
@@ -40,7 +41,8 @@ class TruckService:
         log.info("truck_created", truck_id=str(truck.id), placa=truck.placa)
         return truck
 
-    async def get_by_id(self, truck_id: uuid.UUID) -> Truck:
+    async def get_by_id(self, truck_id: uuid.UUID, requesting_user: User) -> Truck:
+        assert_catalog_read_access(requesting_user)
         truck = await self._repo.get_by_id(truck_id)
         if not truck:
             raise NotFoundException("Caminhão não encontrado")
@@ -49,15 +51,17 @@ class TruckService:
     async def list(
         self,
         params: PageParams,
+        requesting_user: User,
         status: TruckStatus | None = None,
         search: str | None = None,
     ) -> PagedResponse[Truck]:
+        assert_catalog_read_access(requesting_user)
         items, total = await self._repo.list(params, status, search)
         return PagedResponse.create(items, total, params)
 
     async def update(self, truck_id: uuid.UUID, data: TruckUpdate, updated_by: User) -> Truck:
         self._check_write_access(updated_by)
-        truck = await self.get_by_id(truck_id)
+        truck = await self.get_by_id(truck_id, updated_by)
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(truck, field, value)
         truck = await self._repo.update(truck)
@@ -66,7 +70,7 @@ class TruckService:
 
     async def delete(self, truck_id: uuid.UUID, deleted_by: User) -> None:
         self._check_write_access(deleted_by)
-        truck = await self.get_by_id(truck_id)
+        truck = await self.get_by_id(truck_id, deleted_by)
         if truck.status == TruckStatus.EM_VIAGEM:
             raise ForbiddenException("Não é possível remover caminhão em viagem")
         await self._repo.soft_delete(truck)
@@ -75,7 +79,7 @@ class TruckService:
 
     async def update_km(self, truck_id: uuid.UUID, km: float, updated_by: User) -> Truck:
         self._check_write_access(updated_by)
-        truck = await self.get_by_id(truck_id)
+        truck = await self.get_by_id(truck_id, updated_by)
         if km < truck.km_atual:
             raise ValueError("KM não pode ser menor que o atual")
         truck.km_atual = km

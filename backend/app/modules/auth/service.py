@@ -89,6 +89,9 @@ class AuthService:
         email: str,
         password: str,
     ) -> LoginResponse:
+        if settings.is_production and not settings.allow_tenant_registration:
+            raise BadRequestException("Registro de tenant desabilitado")
+
         existing = await self._user_repo.get_by_email(email)
         if existing:
             raise ConflictException("Email já cadastrado")

@@ -34,7 +34,7 @@ async def list_clients(
 ) -> PagedResponse[ClientListResponse]:
     service = ClientService(db)
     params = PageParams(page=page, size=size)
-    return await service.list(params, is_active, search)  # type: ignore[return-value]
+    return await service.list(params, current_user, is_active, search)  # type: ignore[return-value]
 
 
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
@@ -54,7 +54,7 @@ async def get_client(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> ClientRead:
     service = ClientService(db)
-    return await service.get_by_id(client_id)  # type: ignore[return-value]
+    return await service.get_by_id(client_id, current_user)  # type: ignore[return-value]
 
 
 @router.patch("/{client_id}", response_model=ClientRead)

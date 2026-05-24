@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.clients.models import Client
@@ -30,6 +29,7 @@ from app.modules.trucks.models import Truck
 from app.modules.users.models import User
 from app.shared.enums import TRACKING_STATUS_LABELS, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
+from app.shared.security.resource_access import assert_freight_read_access
 
 log = structlog.get_logger(__name__)
 
@@ -47,13 +47,7 @@ class TrackingService:
             raise ForbiddenException("Acesso negado")
 
     async def _check_freight_access(self, freight: Freight, user: User) -> None:
-        if user.role == UserRole.MOTORISTA and freight.driver_id:
-            result = await self._session.execute(
-                select(Driver.user_id).where(Driver.id == freight.driver_id)
-            )
-            driver_user_id = result.scalar_one_or_none()
-            if driver_user_id != user.id:
-                raise ForbiddenException("Acesso negado a este frete")
+        await assert_freight_read_access(self._session, freight, user)
 
     def _to_update_read(self, update: TrackingUpdate) -> TrackingUpdateRead:
         return TrackingUpdateRead(
@@ -109,10 +103,13 @@ class TrackingService:
             notification_id=notification.id,
         )
 
-    async def get_timeline(self, freight_id: uuid.UUID) -> TrackingTimelineResponse:
+    async def get_timeline(
+        self, freight_id: uuid.UUID, user: User
+    ) -> TrackingTimelineResponse:
         freight = await self._freight_repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        await self._check_freight_access(freight, user)
         updates = await self._repo.get_by_freight(freight_id)
         reads = [self._to_update_read(u) for u in updates]
         latest = reads[-1] if reads else None

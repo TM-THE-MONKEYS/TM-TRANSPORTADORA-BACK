@@ -17,6 +17,7 @@ from app.shared.exceptions.custom import (
     NotFoundException,
 )
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import assert_catalog_read_access
 
 log = structlog.get_logger(__name__)
 
@@ -43,7 +44,8 @@ class ClientService:
         log.info("client_created", client_id=str(client.id))
         return client
 
-    async def get_by_id(self, client_id: uuid.UUID) -> Client:
+    async def get_by_id(self, client_id: uuid.UUID, requesting_user: User) -> Client:
+        assert_catalog_read_access(requesting_user)
         client = await self._repo.get_by_id(client_id)
         if not client:
             raise NotFoundException("Cliente não encontrado")
@@ -52,15 +54,17 @@ class ClientService:
     async def list(
         self,
         params: PageParams,
+        requesting_user: User,
         is_active: bool | None = None,
         search: str | None = None,
     ) -> PagedResponse[Client]:
+        assert_catalog_read_access(requesting_user)
         items, total = await self._repo.list(params, is_active, search)
         return PagedResponse.create(items, total, params)
 
     async def update(self, client_id: uuid.UUID, data: ClientUpdate, updated_by: User) -> Client:
         self._check_write_access(updated_by)
-        client = await self.get_by_id(client_id)
+        client = await self.get_by_id(client_id, updated_by)
         update_data = data.model_dump(exclude_none=True)
         if "endereco" in update_data and data.endereco:
             update_data["endereco"] = data.endereco.model_dump()
@@ -72,7 +76,7 @@ class ClientService:
 
     async def delete(self, client_id: uuid.UUID, deleted_by: User) -> None:
         self._check_write_access(deleted_by)
-        client = await self.get_by_id(client_id)
+        client = await self.get_by_id(client_id, deleted_by)
         await self._repo.soft_delete(client)
         await self._session.commit()
         log.info("client_deleted", client_id=str(client_id))

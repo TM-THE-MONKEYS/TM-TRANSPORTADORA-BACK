@@ -35,7 +35,7 @@ async def list_trucks(
 ) -> PagedResponse[TruckFrontendListItem]:
     service = TruckService(db)
     params = PageParams(page=page, size=size)
-    result = await service.list(params, status, search)
+    result = await service.list(params, current_user, status, search)
     frontend_items = [TruckFrontendListItem.from_orm(t) for t in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
 
@@ -58,7 +58,7 @@ async def get_truck(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TruckFrontendRead:
     service = TruckService(db)
-    truck = await service.get_by_id(truck_id)
+    truck = await service.get_by_id(truck_id, current_user)
     return TruckFrontendRead.from_orm(truck)
 
 

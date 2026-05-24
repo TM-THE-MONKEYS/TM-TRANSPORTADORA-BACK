@@ -53,4 +53,4 @@ async def get_freight_timeline(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TrackingTimelineResponse:
     service = TrackingService(db)
-    return await service.get_timeline(freight_id)
+    return await service.get_timeline(freight_id, current_user)

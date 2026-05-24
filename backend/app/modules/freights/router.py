@@ -40,7 +40,9 @@ async def list_freights(
 ) -> PagedResponse[FreightFrontendListItem]:
     service = FreightService(db)
     params = PageParams(page=page, size=size)
-    result = await service.list(params, status, client_id, driver_id, truck_id)
+    result = await service.list(
+        params, current_user, status, client_id, driver_id, truck_id
+    )
     frontend_items = [FreightFrontendListItem.from_orm(f) for f in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
 
@@ -63,7 +65,7 @@ async def get_freight(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
     service = FreightService(db)
-    freight = await service.get_by_id(freight_id)
+    freight = await service.get_by_id(freight_id, current_user)
     return FreightFrontendRead.from_orm(freight)
 
 
@@ -125,7 +127,7 @@ async def list_freight_costs(
 ) -> list[FreightCostRead]:
     """Custos do frete (inclui combustível gerado por abastecimentos)."""
     service = FreightService(db)
-    costs = await service.list_costs(freight_id)
+    costs = await service.list_costs(freight_id, current_user)
     return costs
 
 

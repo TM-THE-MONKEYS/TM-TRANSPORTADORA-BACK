@@ -35,7 +35,7 @@ async def list_drivers(
 ) -> PagedResponse[DriverFrontendListItem]:
     service = DriverService(db)
     params = PageParams(page=page, size=size)
-    result = await service.list(params, status, search)
+    result = await service.list(params, current_user, status, search)
     frontend_items = [DriverFrontendListItem.from_orm(d) for d in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
 
@@ -58,7 +58,7 @@ async def get_driver(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> DriverFrontendRead:
     service = DriverService(db)
-    driver = await service.get_by_id(driver_id)
+    driver = await service.get_by_id(driver_id, current_user)
     return DriverFrontendRead.from_orm(driver)
 
 

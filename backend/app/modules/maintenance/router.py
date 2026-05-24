@@ -36,7 +36,7 @@ async def list_maintenance(
 ) -> PagedResponse[MaintenanceListResponse]:
     service = MaintenanceService(db)
     params = PageParams(page=page, size=size)
-    return await service.list(params, truck_id, status, tipo)  # type: ignore[return-value]
+    return await service.list(params, current_user, truck_id, status, tipo)  # type: ignore[return-value]
 
 
 @router.get("/alerts", response_model=list[MaintenanceRead])
@@ -46,7 +46,7 @@ async def get_maintenance_alerts(
     days_ahead: int = Query(default=30, ge=1, le=365),
 ) -> list[MaintenanceRead]:
     service = MaintenanceService(db)
-    return await service.get_alerts(days_ahead)  # type: ignore[return-value]
+    return await service.get_alerts(days_ahead, current_user)  # type: ignore[return-value]
 
 
 @router.post("", response_model=MaintenanceRead, status_code=status.HTTP_201_CREATED)
@@ -66,7 +66,7 @@ async def get_maintenance(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MaintenanceRead:
     service = MaintenanceService(db)
-    return await service.get_by_id(maintenance_id)  # type: ignore[return-value]
+    return await service.get_by_id(maintenance_id, current_user)  # type: ignore[return-value]
 
 
 @router.patch("/{maintenance_id}", response_model=MaintenanceRead)

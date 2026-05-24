@@ -13,6 +13,10 @@ from app.modules.users.models import User
 from app.shared.enums import FreightStatus, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import (
+    assert_freight_read_access,
+    resolve_freight_list_driver_filter,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -59,20 +63,25 @@ class FreightService:
         log.info("freight_created", freight_id=str(freight.id), client_id=str(data.client_id))
         return freight
 
-    async def get_by_id(self, freight_id: uuid.UUID) -> Freight:
+    async def get_by_id(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         freight = await self._repo.get_by_id(freight_id, with_relations=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        await assert_freight_read_access(self._session, freight, requesting_user)
         return freight
 
     async def list(
         self,
         params: PageParams,
+        requesting_user: User,
         status: FreightStatus | None = None,
         client_id: uuid.UUID | None = None,
         driver_id: uuid.UUID | None = None,
         truck_id: uuid.UUID | None = None,
     ) -> PagedResponse[Freight]:
+        driver_id = await resolve_freight_list_driver_filter(
+            self._session, requesting_user, driver_id
+        )
         items, total = await self._repo.list(params, status, client_id, driver_id, truck_id)
         return PagedResponse.create(items, total, params)
 
@@ -139,10 +148,13 @@ class FreightService:
         log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
         return freight
 
-    async def list_costs(self, freight_id: uuid.UUID) -> list[FreightCost]:
+    async def list_costs(
+        self, freight_id: uuid.UUID, requesting_user: User
+    ) -> list[FreightCost]:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        await assert_freight_read_access(self._session, freight, requesting_user)
         return await self._repo.list_costs_by_freight(freight_id)
 
     async def add_cost(self, freight_id: uuid.UUID, data: FreightCostCreate, added_by: User) -> FreightCost:

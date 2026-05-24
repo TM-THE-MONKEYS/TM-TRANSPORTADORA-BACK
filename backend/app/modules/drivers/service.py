@@ -17,6 +17,7 @@ from app.shared.exceptions.custom import (
     NotFoundException,
 )
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import assert_catalog_read_access
 
 log = structlog.get_logger(__name__)
 
@@ -42,7 +43,8 @@ class DriverService:
         log.info("driver_created", driver_id=str(driver.id))
         return driver
 
-    async def get_by_id(self, driver_id: uuid.UUID) -> Driver:
+    async def get_by_id(self, driver_id: uuid.UUID, requesting_user: User) -> Driver:
+        assert_catalog_read_access(requesting_user)
         driver = await self._repo.get_by_id(driver_id)
         if not driver:
             raise NotFoundException("Motorista não encontrado")
@@ -51,15 +53,17 @@ class DriverService:
     async def list(
         self,
         params: PageParams,
+        requesting_user: User,
         status: DriverStatus | None = None,
         search: str | None = None,
     ) -> PagedResponse[Driver]:
+        assert_catalog_read_access(requesting_user)
         items, total = await self._repo.list(params, status, search)
         return PagedResponse.create(items, total, params)
 
     async def update(self, driver_id: uuid.UUID, data: DriverUpdate, updated_by: User) -> Driver:
         self._check_write_access(updated_by)
-        driver = await self.get_by_id(driver_id)
+        driver = await self.get_by_id(driver_id, updated_by)
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(driver, field, value)
         driver = await self._repo.update(driver)
@@ -68,7 +72,7 @@ class DriverService:
 
     async def delete(self, driver_id: uuid.UUID, deleted_by: User) -> None:
         self._check_write_access(deleted_by)
-        driver = await self.get_by_id(driver_id)
+        driver = await self.get_by_id(driver_id, deleted_by)
         await self._repo.soft_delete(driver)
         await self._session.commit()
         log.info("driver_deleted", driver_id=str(driver_id))

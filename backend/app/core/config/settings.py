@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     rate_limit_auth_per_minute: int = 10
 
+    # Registro público de tenant (desligar em produção)
+    allow_tenant_registration: bool = True
+
     # Logging
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"

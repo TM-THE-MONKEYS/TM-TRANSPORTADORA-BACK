@@ -28,6 +28,10 @@ from app.modules.users.models import User
 from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import (
+    assert_freight_read_access,
+    get_driver_id_for_user,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -47,12 +51,6 @@ class FuelService:
         if user.role not in _WRITE_ROLES:
             raise ForbiddenException("Acesso negado")
 
-    async def _get_driver_id_for_user(self, user: User) -> uuid.UUID | None:
-        result = await self._session.execute(
-            select(Driver.id).where(Driver.user_id == user.id)
-        )
-        return result.scalar_one_or_none()
-
     async def _resolve_driver_id(
         self, freight: Freight, payload_driver_id: uuid.UUID | None, user: User
     ) -> uuid.UUID:
@@ -67,7 +65,7 @@ class FuelService:
             )
 
         if user.role == UserRole.MOTORISTA:
-            my_driver_id = await self._get_driver_id_for_user(user)
+            my_driver_id = await get_driver_id_for_user(self._session, user)
             if not my_driver_id or freight.driver_id != my_driver_id:
                 raise ForbiddenException(
                     "Somente o motorista do frete pode registrar abastecimento"
@@ -139,6 +137,7 @@ class FuelService:
         if not freight:
             raise NotFoundException("Frete não encontrado")
 
+        await assert_freight_read_access(self._session, freight, author)
         await self._check_freight_active_for_refill(freight)
         driver_id = await self._resolve_driver_id(freight, data.driver_id, author)
         truck_id = data.truck_id or freight.truck_id
@@ -232,13 +231,7 @@ class FuelService:
         return await self._enrich_read(refill)
 
     async def _check_read_access(self, freight: Freight, user: User) -> None:
-        if user.role == UserRole.MOTORISTA and freight.driver_id:
-            result = await self._session.execute(
-                select(Driver.user_id).where(Driver.id == freight.driver_id)
-            )
-            driver_user_id = result.scalar_one_or_none()
-            if driver_user_id != user.id:
-                raise ForbiddenException("Acesso negado a este frete")
+        await assert_freight_read_access(self._session, freight, user)
 
     async def list_all(
         self,
@@ -250,7 +243,7 @@ class FuelService:
 
         driver_filter: uuid.UUID | None = None
         if user.role == UserRole.MOTORISTA:
-            driver_filter = await self._get_driver_id_for_user(user)
+            driver_filter = await get_driver_id_for_user(self._session, user)
             if not driver_filter:
                 return PagedResponse.create([], 0, params)
 
@@ -345,7 +338,7 @@ class FuelService:
 
         driver_filter: uuid.UUID | None = None
         if user.role == UserRole.MOTORISTA:
-            driver_filter = await self._get_driver_id_for_user(user)
+            driver_filter = await get_driver_id_for_user(self._session, user)
             if not driver_filter:
                 return []
 
