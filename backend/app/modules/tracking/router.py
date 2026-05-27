@@ -31,7 +31,7 @@ async def add_tracking_update(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TrackingUpdateCreatedResponse:
-    service = TrackingService(db)
+    service = TrackingService(db, current_user.tenant_id)
     return await service.add_update(payload, current_user)
 
 
@@ -42,7 +42,7 @@ async def get_freight_tracking_detail(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TrackingFreightDetailResponse:
     """Tela de rastreamento: frete + linha do tempo de ocorrências."""
-    service = TrackingService(db)
+    service = TrackingService(db, current_user.tenant_id)
     return await service.get_freight_detail(freight_id, current_user)
 
 
@@ -52,5 +52,5 @@ async def get_freight_timeline(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TrackingTimelineResponse:
-    service = TrackingService(db)
+    service = TrackingService(db, current_user.tenant_id)
     return await service.get_timeline(freight_id, current_user)

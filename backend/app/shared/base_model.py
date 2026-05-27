@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,17 @@ class SoftDeleteMixin:
 
     def soft_delete(self) -> None:
         self.deleted_at = datetime.now(timezone.utc)
+
+
+class TenantMixin:
+    """Adds tenant_id FK to scope rows per tenant."""
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tm_tenants.id"),
+        nullable=False,
+        index=True,
+    )
 
 
 class BaseModel(Base, TimestampMixin):

@@ -42,10 +42,11 @@ _READ_ELIGIBLE_ROLES = frozenset(
 
 
 class FuelService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = FuelRepository(session)
-        self._freight_repo = FreightRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = FuelRepository(session, tenant_id)
+        self._freight_repo = FreightRepository(session, tenant_id)
 
     def _check_write_access(self, user: User) -> None:
         if user.role not in _WRITE_ROLES:
@@ -154,6 +155,7 @@ class FuelService:
             tipo="COMBUSTIVEL",
             valor=valor_total,
             descricao=cost_desc,
+            tenant_id=self._tenant_id,
         )
         self._session.add(cost)
         await self._session.flush()
@@ -173,6 +175,7 @@ class FuelService:
             estado=data.estado,
             observacoes=data.observacoes,
             data_abastecimento=data.data_abastecimento or datetime.now(timezone.utc),
+            tenant_id=self._tenant_id,
         )
         refill = await self._repo.create(refill)
 
@@ -189,7 +192,7 @@ class FuelService:
 
         await create_fuel_expense(self._session, refill, cost_desc)
 
-        notification_service = NotificationService(self._session)
+        notification_service = NotificationService(self._session, self._tenant_id)
         notification = await notification_service.create_for_fuel_refill(refill, author)
 
         await self._session.commit()

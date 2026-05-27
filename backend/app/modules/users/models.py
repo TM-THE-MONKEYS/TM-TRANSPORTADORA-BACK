@@ -4,11 +4,11 @@ from __future__ import annotations
 from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import UserRole
 
 
-class User(SoftDeleteMixin, BaseModel):
+class User(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_users"
 
     nome: Mapped[str] = mapped_column(String(150), nullable=False)

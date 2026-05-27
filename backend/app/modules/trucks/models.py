@@ -4,11 +4,11 @@ from __future__ import annotations
 from sqlalchemy import Enum, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import TruckStatus
 
 
-class Truck(SoftDeleteMixin, BaseModel):
+class Truck(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_trucks"
 
     placa: Mapped[str] = mapped_column(String(10), nullable=False, unique=True, index=True)

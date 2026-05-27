@@ -23,6 +23,7 @@ import app.modules.finance.models  # noqa: F401
 import app.modules.tracking.models  # noqa: F401
 import app.modules.notifications.models  # noqa: F401
 import app.modules.fuel.models  # noqa: F401
+import app.modules.tenants.models  # noqa: F401
 
 config = context.config
 

@@ -8,11 +8,11 @@ from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel
+from app.shared.base_model import BaseModel, TenantMixin
 from app.shared.enums import TrackingStatus
 
 
-class TrackingUpdate(BaseModel):
+class TrackingUpdate(TenantMixin, BaseModel):
     __tablename__ = "tm_tracking_updates"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(

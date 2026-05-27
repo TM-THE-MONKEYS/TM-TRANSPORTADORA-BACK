@@ -26,9 +26,10 @@ _WRITE_ROLES = frozenset({UserRole.ADMIN, UserRole.FINANCEIRO})
 
 
 class FinanceService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = FinanceRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = FinanceRepository(session, tenant_id)
 
     def _check_read_access(self, user: User) -> None:
         if user.role not in _READ_ROLES:
@@ -99,7 +100,7 @@ class FinanceService:
         self._check_write_access(requesting_user)
         from app.modules.finance.freight_sync import sync_all_from_freights
 
-        stats = await sync_all_from_freights(self._session)
+        stats = await sync_all_from_freights(self._session, self._tenant_id)
         await self._session.commit()
         log.info("finance_sync_from_freights", **stats)
         return stats

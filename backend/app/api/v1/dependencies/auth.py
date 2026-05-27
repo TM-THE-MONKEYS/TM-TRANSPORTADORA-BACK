@@ -7,12 +7,12 @@ import structlog
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.database import get_db
 from app.core.security.jwt import decode_access_token
 from app.modules.users.models import User
-from app.modules.users.repository import UserRepository
 from app.shared.enums import UserRole
 from app.shared.exceptions.custom import ForbiddenException, UnauthorizedException
 
@@ -43,8 +43,10 @@ async def get_current_user(
     except ValueError:
         raise UnauthorizedException("Token inválido")
 
-    repo = UserRepository(db)
-    user = await repo.get_by_id(user_id)
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.deleted_at.is_(None))
+    )
+    user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException("Usuário não encontrado")
 

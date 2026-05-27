@@ -35,12 +35,13 @@ log = structlog.get_logger(__name__)
 
 
 class TrackingService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = TrackingRepository(session)
-        self._freight_repo = FreightRepository(session)
-        self._notification_repo = NotificationRepository(session)
-        self._fuel_repo = FuelRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = TrackingRepository(session, tenant_id)
+        self._freight_repo = FreightRepository(session, tenant_id)
+        self._notification_repo = NotificationRepository(session, tenant_id)
+        self._fuel_repo = FuelRepository(session, tenant_id)
 
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR, UserRole.MOTORISTA):
@@ -82,10 +83,11 @@ class TrackingService:
             cidade=data.cidade,
             estado=data.estado,
             evento_at=data.evento_at or datetime.now(timezone.utc),
+            tenant_id=self._tenant_id,
         )
         tracking = await self._repo.create(tracking)
 
-        notification_service = NotificationService(self._session)
+        notification_service = NotificationService(self._session, self._tenant_id)
         notification = await notification_service.create_for_tracking_update(
             tracking, added_by
         )
@@ -173,7 +175,7 @@ class TrackingService:
         fuel_items, _ = await self._fuel_repo.list_by_freight(
             freight_id, limit=50, offset=0
         )
-        fuel_service = FuelService(self._session)
+        fuel_service = FuelService(self._session, self._tenant_id)
         fuel_reads = [await fuel_service._enrich_read(r) for r in fuel_items]
         total_litros, total_valor, _ = await self._fuel_repo.summarize_freight(freight_id)
 

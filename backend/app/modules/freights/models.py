@@ -8,11 +8,11 @@ from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import FreightStatus
 
 
-class Freight(SoftDeleteMixin, BaseModel):
+class Freight(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_freights"
 
     client_id: Mapped[uuid.UUID] = mapped_column(
@@ -50,7 +50,7 @@ class Freight(SoftDeleteMixin, BaseModel):
     )
 
 
-class FreightCost(BaseModel):
+class FreightCost(TenantMixin, BaseModel):
     __tablename__ = "tm_freight_costs"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
@@ -63,7 +63,7 @@ class FreightCost(BaseModel):
     freight: Mapped["Freight"] = relationship(back_populates="costs")
 
 
-class FreightAttachment(BaseModel):
+class FreightAttachment(TenantMixin, BaseModel):
     __tablename__ = "tm_freight_attachments"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(

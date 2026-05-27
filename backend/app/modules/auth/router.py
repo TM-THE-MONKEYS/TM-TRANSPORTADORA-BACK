@@ -12,6 +12,7 @@ from app.api.v1.dependencies.database import get_db
 from app.modules.auth.schemas import (
     AuthUserResponse,
     ChangePasswordRequest,
+    DriverLoginRequest,
     ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
@@ -41,6 +42,16 @@ async def login(
     return await service.login(payload.email, payload.password, _get_device_info(request))
 
 
+@router.post("/driver/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+async def driver_login(
+    payload: DriverLoginRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> LoginResponse:
+    service = AuthService(db)
+    return await service.login_driver(payload.cpf, payload.password, _get_device_info(request))
+
+
 @router.post("/register-tenant", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 async def register_tenant(
     payload: RegisterTenantRequest,
@@ -52,6 +63,7 @@ async def register_tenant(
         payload.admin_name,
         payload.email,
         payload.password,
+        payload.document,
     )
 
 

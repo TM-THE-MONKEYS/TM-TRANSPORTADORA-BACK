@@ -34,7 +34,7 @@ async def list_maintenance(
     status: MaintenanceStatus | None = Query(default=None),
     tipo: MaintenanceType | None = Query(default=None),
 ) -> PagedResponse[MaintenanceListResponse]:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(params, current_user, truck_id, status, tipo)  # type: ignore[return-value]
 
@@ -45,7 +45,7 @@ async def get_maintenance_alerts(
     current_user: Annotated[User, Depends(get_current_active_user)],
     days_ahead: int = Query(default=30, ge=1, le=365),
 ) -> list[MaintenanceRead]:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     return await service.get_alerts(days_ahead, current_user)  # type: ignore[return-value]
 
 
@@ -55,7 +55,7 @@ async def create_maintenance(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MaintenanceRead:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     return await service.create(payload, current_user)  # type: ignore[return-value]
 
 
@@ -65,7 +65,7 @@ async def get_maintenance(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MaintenanceRead:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     return await service.get_by_id(maintenance_id, current_user)  # type: ignore[return-value]
 
 
@@ -76,7 +76,7 @@ async def update_maintenance(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MaintenanceRead:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     return await service.update(maintenance_id, payload, current_user)  # type: ignore[return-value]
 
 
@@ -90,6 +90,6 @@ async def delete_maintenance(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = MaintenanceService(db)
+    service = MaintenanceService(db, current_user.tenant_id)
     await service.delete(maintenance_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

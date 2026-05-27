@@ -35,7 +35,7 @@ async def register_fuel_refill(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FuelRefillCreatedResponse:
     """Registra abastecimento vinculado ao frete e motorista (litros + valor BR)."""
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.create(payload, current_user)
 
 
@@ -48,7 +48,7 @@ async def list_eligible_freights_for_fuel(
 
     Motorista: apenas fretes em que está vinculado. Admin/operador: todos em viagem.
     """
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.list_eligible_freights(current_user)
 
 
@@ -58,7 +58,7 @@ async def get_active_freight_for_driver(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> ActiveFreightContext:
     """Frete em andamento do motorista logado (pré-preenche tela de abastecimento)."""
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.get_active_freight_context(current_user)
 
 
@@ -68,7 +68,7 @@ async def get_freight_fuel_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FuelFreightSummary:
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.get_freight_summary(freight_id, current_user)
 
 
@@ -80,7 +80,7 @@ async def list_fuel_refills(
     size: int = Query(default=20, ge=1, le=100),
 ) -> PagedResponse[FuelRefillRead]:
     """Histórico geral de abastecimentos (admin/operador: todos; motorista: só os seus)."""
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.list_all(PageParams(page=page, size=size), current_user)
 
 
@@ -92,7 +92,7 @@ async def list_freight_fuel_refills(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
 ) -> PagedResponse[FuelRefillRead]:
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.list_by_freight(freight_id, PageParams(page=page, size=size), current_user)
 
 
@@ -102,5 +102,5 @@ async def get_fuel_refill(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FuelRefillRead:
-    service = FuelService(db)
+    service = FuelService(db, current_user.tenant_id)
     return await service.get_by_id(refill_id, current_user)

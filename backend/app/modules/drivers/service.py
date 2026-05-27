@@ -6,10 +6,12 @@ import uuid
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security.password import hash_password
 from app.modules.drivers.models import Driver
 from app.modules.drivers.repository import DriverRepository
 from app.modules.drivers.schemas import DriverCreate, DriverUpdate
 from app.modules.users.models import User
+from app.modules.users.repository import UserRepository
 from app.shared.enums import DriverStatus, UserRole
 from app.shared.exceptions.custom import (
     ConflictException,
@@ -23,9 +25,11 @@ log = structlog.get_logger(__name__)
 
 
 class DriverService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = DriverRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = DriverRepository(session, tenant_id)
+        self._user_repo = UserRepository(session, tenant_id)
 
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):
@@ -37,10 +41,34 @@ class DriverService:
             raise ConflictException("CPF já cadastrado")
         if await self._repo.get_by_cnh(data.cnh):
             raise ConflictException("CNH já cadastrada")
-        driver = Driver(**data.model_dump())
+
+        driver_email = data.email or f"{data.cpf}@motorista.local"
+        existing_user = await self._user_repo.get_by_email(driver_email)
+        if existing_user:
+            raise ConflictException("Email já cadastrado para outro usuário")
+
+        driver_user = User(
+            nome=data.nome,
+            email=driver_email,
+            hashed_password=hash_password(data.password),
+            role=UserRole.MOTORISTA,
+            is_active=True,
+            tenant_id=self._tenant_id,
+        )
+        self._session.add(driver_user)
+        await self._session.flush()
+        await self._session.refresh(driver_user)
+
+        driver_data = data.model_dump(exclude={"password"})
+        driver_data["user_id"] = driver_user.id
+        driver = Driver(**driver_data)
         driver = await self._repo.create(driver)
         await self._session.commit()
-        log.info("driver_created", driver_id=str(driver.id))
+        log.info(
+            "driver_created_with_account",
+            driver_id=str(driver.id),
+            user_id=str(driver_user.id),
+        )
         return driver
 
     async def get_by_id(self, driver_id: uuid.UUID, requesting_user: User) -> Driver:

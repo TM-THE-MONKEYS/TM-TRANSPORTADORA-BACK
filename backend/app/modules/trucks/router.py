@@ -33,7 +33,7 @@ async def list_trucks(
     status: TruckStatus | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
 ) -> PagedResponse[TruckFrontendListItem]:
-    service = TruckService(db)
+    service = TruckService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     result = await service.list(params, current_user, status, search)
     frontend_items = [TruckFrontendListItem.from_orm(t) for t in result.items]
@@ -46,7 +46,7 @@ async def create_truck(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TruckFrontendRead:
-    service = TruckService(db)
+    service = TruckService(db, current_user.tenant_id)
     truck = await service.create(payload, current_user)
     return TruckFrontendRead.from_orm(truck)
 
@@ -57,7 +57,7 @@ async def get_truck(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TruckFrontendRead:
-    service = TruckService(db)
+    service = TruckService(db, current_user.tenant_id)
     truck = await service.get_by_id(truck_id, current_user)
     return TruckFrontendRead.from_orm(truck)
 
@@ -69,7 +69,7 @@ async def update_truck(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> TruckFrontendRead:
-    service = TruckService(db)
+    service = TruckService(db, current_user.tenant_id)
     truck = await service.update(truck_id, payload, current_user)
     return TruckFrontendRead.from_orm(truck)
 
@@ -84,6 +84,6 @@ async def delete_truck(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = TruckService(db)
+    service = TruckService(db, current_user.tenant_id)
     await service.delete(truck_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

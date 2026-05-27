@@ -48,6 +48,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class DriverLoginRequest(BaseModel):
+    cpf: str = Field(min_length=11, max_length=14)
+    password: str = Field(min_length=1)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -62,9 +67,11 @@ class AuthUserResponse(BaseModel):
     email: str
     name: str
     role: str
-    tenant_id: str
+    tenant_id: str  # serialized UUID
     branch_id: str | None = None
     permissions: list[str]
+
+    model_config = {"from_attributes": True}
 
 
 class LoginResponse(BaseModel):

@@ -8,24 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.freights.models import Freight
 from app.modules.fuel.models import FuelRefill
+from app.shared.base_repository import TenantBaseRepository
 from app.shared.enums import ACTIVE_FREIGHT_STATUSES
 
 
-class FuelRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+class FuelRepository(TenantBaseRepository[FuelRefill]):
+    model = FuelRefill
 
-    async def create(self, refill: FuelRefill) -> FuelRefill:
-        self._session.add(refill)
-        await self._session.flush()
-        await self._session.refresh(refill)
-        return refill
-
-    async def get_by_id(self, refill_id: uuid.UUID) -> FuelRefill | None:
-        result = await self._session.execute(
-            select(FuelRefill).where(FuelRefill.id == refill_id)
-        )
-        return result.scalar_one_or_none()
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
+        super().__init__(session, tenant_id)
 
     async def list_all(
         self,
@@ -37,7 +28,7 @@ class FuelRepository:
         base = (
             select(FuelRefill)
             .join(Freight, FuelRefill.freight_id == Freight.id)
-            .where(Freight.deleted_at.is_(None))
+            .where(Freight.deleted_at.is_(None), FuelRefill.tenant_id == self._tenant_id)
         )
         if driver_id is not None:
             base = base.where(FuelRefill.driver_id == driver_id)
@@ -59,7 +50,10 @@ class FuelRepository:
         limit: int,
         offset: int,
     ) -> tuple[list[FuelRefill], int]:
-        base = select(FuelRefill).where(FuelRefill.freight_id == freight_id)
+        base = select(FuelRefill).where(
+            FuelRefill.freight_id == freight_id,
+            FuelRefill.tenant_id == self._tenant_id,
+        )
         count_q = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_q)).scalar_one()
 
@@ -76,7 +70,10 @@ class FuelRepository:
                 func.coalesce(func.sum(FuelRefill.litros), 0.0),
                 func.coalesce(func.sum(FuelRefill.valor_total), 0.0),
                 func.count(FuelRefill.id),
-            ).where(FuelRefill.freight_id == freight_id)
+            ).where(
+                FuelRefill.freight_id == freight_id,
+                FuelRefill.tenant_id == self._tenant_id,
+            )
         )
         row = result.one()
         return float(row[0]), float(row[1]), int(row[2])
@@ -85,10 +82,12 @@ class FuelRepository:
         self, user_id: uuid.UUID
     ) -> uuid.UUID | None:
         from app.modules.drivers.models import Driver
-        from app.modules.freights.models import Freight
 
         driver_result = await self._session.execute(
-            select(Driver.id).where(Driver.user_id == user_id)
+            select(Driver.id).where(
+                Driver.user_id == user_id,
+                Driver.tenant_id == self._tenant_id,
+            )
         )
         driver_id = driver_result.scalar_one_or_none()
         if not driver_id:
@@ -100,6 +99,7 @@ class FuelRepository:
                 Freight.driver_id == driver_id,
                 Freight.status.in_(ACTIVE_FREIGHT_STATUSES),
                 Freight.deleted_at.is_(None),
+                Freight.tenant_id == self._tenant_id,
             )
             .order_by(Freight.updated_at.desc())
             .limit(1)
@@ -117,6 +117,7 @@ class FuelRepository:
             Freight.status.in_(ACTIVE_FREIGHT_STATUSES),
             Freight.deleted_at.is_(None),
             Freight.driver_id.isnot(None),
+            Freight.tenant_id == self._tenant_id,
         )
         if driver_id is not None:
             base = base.where(Freight.driver_id == driver_id)

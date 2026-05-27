@@ -34,6 +34,18 @@ class DriverCreate(BaseModel):
     status: DriverStatus = DriverStatus.ATIVO
     observacoes: str | None = None
     user_id: uuid.UUID | None = None
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError("Senha deve ter pelo menos uma letra maiúscula")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Senha deve ter pelo menos um número")
+        if not any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in v):
+            raise ValueError("Senha deve ter pelo menos um caractere especial")
+        return v
 
     @model_validator(mode="before")
     @classmethod

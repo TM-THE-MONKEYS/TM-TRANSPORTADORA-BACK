@@ -38,7 +38,7 @@ async def list_freights(
     driver_id: uuid.UUID | None = Query(default=None),
     truck_id: uuid.UUID | None = Query(default=None),
 ) -> PagedResponse[FreightFrontendListItem]:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     result = await service.list(
         params, current_user, status, client_id, driver_id, truck_id
@@ -53,7 +53,7 @@ async def create_freight(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     freight = await service.create(payload, current_user)
     return FreightFrontendRead.from_orm(freight)
 
@@ -64,7 +64,7 @@ async def get_freight(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     freight = await service.get_by_id(freight_id, current_user)
     return FreightFrontendRead.from_orm(freight)
 
@@ -76,7 +76,7 @@ async def update_freight(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     freight = await service.update(freight_id, payload, current_user)
     return FreightFrontendRead.from_orm(freight)
 
@@ -87,7 +87,7 @@ async def advance_freight_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     freight = await service.advance_status(freight_id, current_user)
     return FreightFrontendRead.from_orm(freight)
 
@@ -99,7 +99,7 @@ async def update_freight_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     freight = await service.update_status(freight_id, payload.status, current_user)
     return FreightFrontendRead.from_orm(freight)
 
@@ -114,7 +114,7 @@ async def delete_freight(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     await service.delete(freight_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -126,7 +126,7 @@ async def list_freight_costs(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> list[FreightCostRead]:
     """Custos do frete (inclui combustível gerado por abastecimentos)."""
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     costs = await service.list_costs(freight_id, current_user)
     return costs
 
@@ -138,5 +138,5 @@ async def add_freight_cost(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightCostRead:
-    service = FreightService(db)
+    service = FreightService(db, current_user.tenant_id)
     return await service.add_cost(freight_id, payload, current_user)  # type: ignore[return-value]

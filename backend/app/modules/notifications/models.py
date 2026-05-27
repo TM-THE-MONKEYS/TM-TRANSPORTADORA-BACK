@@ -8,11 +8,11 @@ from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstrain
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel
+from app.shared.base_model import BaseModel, TenantMixin
 from app.shared.enums import NotificationType
 
 
-class FreightNotification(BaseModel):
+class FreightNotification(TenantMixin, BaseModel):
     """Notificação gerada quando motorista/operador registra ocorrência de rastreamento."""
 
     __tablename__ = "tm_freight_notifications"
@@ -64,7 +64,7 @@ class FreightNotification(BaseModel):
     )
 
 
-class NotificationRead(BaseModel):
+class NotificationRead(TenantMixin, BaseModel):
     """Controle de leitura por usuário (badge / centro de notificações)."""
 
     __tablename__ = "tm_notification_reads"

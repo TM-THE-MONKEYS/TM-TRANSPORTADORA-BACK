@@ -29,7 +29,7 @@ async def list_notifications(
     size: int = Query(default=20, ge=1, le=100),
     unread_only: bool = Query(default=False),
 ) -> NotificationListResponse:
-    service = NotificationService(db)
+    service = NotificationService(db, current_user.tenant_id)
     return await service.list_notifications(
         current_user, unread_only=unread_only, page=page, size=size
     )
@@ -40,7 +40,7 @@ async def get_unread_count(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UnreadCountResponse:
-    service = NotificationService(db)
+    service = NotificationService(db, current_user.tenant_id)
     return await service.get_unread_count(current_user)
 
 
@@ -50,7 +50,7 @@ async def mark_notification_read(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MarkReadResponse:
-    service = NotificationService(db)
+    service = NotificationService(db, current_user.tenant_id)
     return await service.mark_read(notification_id, current_user)
 
 
@@ -59,5 +59,5 @@ async def mark_all_notifications_read(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> MarkAllReadResponse:
-    service = NotificationService(db)
+    service = NotificationService(db, current_user.tenant_id)
     return await service.mark_all_read(current_user)

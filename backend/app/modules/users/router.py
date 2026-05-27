@@ -40,7 +40,7 @@ async def list_users(
     is_active: bool | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
 ) -> PagedResponse[UserListResponse]:
-    service = UserService(db)
+    service = UserService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(params, role, is_active, search)  # type: ignore[return-value]
 
@@ -56,7 +56,7 @@ async def create_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserRead:
-    service = UserService(db)
+    service = UserService(db, current_user.tenant_id)
     return await service.create(payload, current_user)  # type: ignore[return-value]
 
 
@@ -68,8 +68,9 @@ async def create_user(
 async def get_user(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserRead:
-    service = UserService(db)
+    service = UserService(db, current_user.tenant_id)
     return await service.get_by_id(user_id)  # type: ignore[return-value]
 
 
@@ -80,7 +81,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserRead:
-    service = UserService(db)
+    service = UserService(db, current_user.tenant_id)
     return await service.update(user_id, payload, current_user)  # type: ignore[return-value]
 
 
@@ -95,6 +96,6 @@ async def delete_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = UserService(db)
+    service = UserService(db, current_user.tenant_id)
     await service.delete(user_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

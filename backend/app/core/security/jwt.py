@@ -18,6 +18,7 @@ def create_access_token(
     user_id: UUID,
     role: UserRole,
     expires_delta: timedelta | None = None,
+    tenant_id: UUID | None = None,
 ) -> str:
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
@@ -29,6 +30,8 @@ def create_access_token(
         "iat": datetime.now(timezone.utc),
         "type": "access",
     }
+    if tenant_id is not None:
+        payload["tenant_id"] = str(tenant_id)
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 

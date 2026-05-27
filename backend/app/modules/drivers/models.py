@@ -8,11 +8,11 @@ from sqlalchemy import Date, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import CNHCategory, DriverStatus
 
 
-class Driver(SoftDeleteMixin, BaseModel):
+class Driver(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_drivers"
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(

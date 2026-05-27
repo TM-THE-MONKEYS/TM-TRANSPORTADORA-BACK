@@ -8,11 +8,11 @@ from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import MaintenanceStatus, MaintenanceType
 
 
-class Maintenance(SoftDeleteMixin, BaseModel):
+class Maintenance(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_maintenance"
 
     truck_id: Mapped[uuid.UUID] = mapped_column(

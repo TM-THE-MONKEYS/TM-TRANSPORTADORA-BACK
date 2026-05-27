@@ -21,12 +21,22 @@ _FREIGHT_READ_ALL_ROLES = frozenset(
 
 
 async def get_driver_id_for_user(session: AsyncSession, user: User) -> uuid.UUID | None:
-    result = await session.execute(select(Driver.id).where(Driver.user_id == user.id))
+    result = await session.execute(
+        select(Driver.id).where(
+            Driver.user_id == user.id,
+            Driver.tenant_id == user.tenant_id,
+        )
+    )
     return result.scalar_one_or_none()
 
 
-async def get_driver_user_id(session: AsyncSession, driver_id: uuid.UUID) -> uuid.UUID | None:
-    result = await session.execute(select(Driver.user_id).where(Driver.id == driver_id))
+async def get_driver_user_id(session: AsyncSession, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> uuid.UUID | None:
+    result = await session.execute(
+        select(Driver.user_id).where(
+            Driver.id == driver_id,
+            Driver.tenant_id == tenant_id,
+        )
+    )
     return result.scalar_one_or_none()
 
 
@@ -39,7 +49,7 @@ async def assert_freight_read_access(
             raise ForbiddenException("Acesso negado a fretes")
         if not freight.driver_id:
             raise ForbiddenException("Acesso negado a este frete")
-        driver_user_id = await get_driver_user_id(session, freight.driver_id)
+        driver_user_id = await get_driver_user_id(session, freight.driver_id, user.tenant_id)
         if driver_user_id != user.id:
             raise ForbiddenException("Acesso negado a este frete")
 

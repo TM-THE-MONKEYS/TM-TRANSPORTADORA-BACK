@@ -23,9 +23,10 @@ log = structlog.get_logger(__name__)
 
 
 class TruckService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = TruckRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = TruckRepository(session, tenant_id)
 
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):

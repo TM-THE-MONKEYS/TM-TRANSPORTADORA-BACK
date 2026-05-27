@@ -4,10 +4,10 @@ from __future__ import annotations
 from sqlalchemy import JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 
 
-class Client(SoftDeleteMixin, BaseModel):
+class Client(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_clients"
 
     nome: Mapped[str] = mapped_column(String(200), nullable=False)

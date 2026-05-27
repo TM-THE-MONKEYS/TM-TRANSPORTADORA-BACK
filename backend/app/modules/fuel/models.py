@@ -8,10 +8,10 @@ from sqlalchemy import DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel
+from app.shared.base_model import BaseModel, TenantMixin
 
 
-class FuelRefill(BaseModel):
+class FuelRefill(TenantMixin, BaseModel):
     """Registro de abastecimento vinculado ao frete e motorista em viagem."""
 
     __tablename__ = "tm_fuel_refills"

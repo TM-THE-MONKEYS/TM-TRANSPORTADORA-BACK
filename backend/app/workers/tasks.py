@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 
 import structlog
 
@@ -22,16 +22,28 @@ def _run_async(coro):  # type: ignore[no-untyped-def]
 
 @celery_app.task(name="app.workers.tasks.check_maintenance_alerts", bind=True, max_retries=3)
 def check_maintenance_alerts(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
-    """Check and log upcoming maintenance alerts."""
+    """Check and log upcoming maintenance alerts across all tenants."""
     async def _run() -> dict[str, int]:
-        from app.core.database.session import AsyncSessionLocal
-        from app.modules.maintenance.repository import MaintenanceRepository
+        from datetime import timedelta
 
+        from sqlalchemy import func, select
+
+        from app.core.database.session import AsyncSessionLocal
+        from app.modules.maintenance.models import Maintenance
+        from app.shared.enums import MaintenanceStatus
+
+        cutoff = datetime.now(timezone.utc) + timedelta(days=7)
         async with AsyncSessionLocal() as session:
-            repo = MaintenanceRepository(session)
-            alerts = await repo.get_upcoming_alerts(days_ahead=7)
-            log.info("maintenance_alerts_checked", count=len(alerts))
-            return {"alerts_count": len(alerts)}
+            result = await session.execute(
+                select(func.count(Maintenance.id)).where(
+                    Maintenance.deleted_at.is_(None),
+                    Maintenance.status == MaintenanceStatus.AGENDADA,
+                    Maintenance.data_prevista <= cutoff,
+                )
+            )
+            count = result.scalar_one()
+            log.info("maintenance_alerts_checked", count=count)
+            return {"alerts_count": count}
 
     try:
         return _run_async(_run())
@@ -42,7 +54,7 @@ def check_maintenance_alerts(self) -> dict[str, int]:  # type: ignore[no-untyped
 
 @celery_app.task(name="app.workers.tasks.mark_overdue_payments", bind=True, max_retries=3)
 def mark_overdue_payments(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
-    """Mark finance entries as overdue if past due date."""
+    """Mark finance entries as overdue if past due date (across all tenants)."""
     async def _run() -> dict[str, int]:
         from sqlalchemy import update
 
@@ -75,15 +87,21 @@ def mark_overdue_payments(self) -> dict[str, int]:  # type: ignore[no-untyped-de
 
 @celery_app.task(name="app.workers.tasks.cleanup_expired_tokens", bind=True, max_retries=3)
 def cleanup_expired_tokens(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
-    """Remove expired refresh tokens from database."""
+    """Remove expired refresh tokens from database (across all tenants)."""
     async def _run() -> dict[str, int]:
+        from sqlalchemy import delete
+
         from app.core.database.session import AsyncSessionLocal
-        from app.modules.auth.repository import RefreshTokenRepository
+        from app.modules.auth.models import RefreshToken
 
         async with AsyncSessionLocal() as session:
-            repo = RefreshTokenRepository(session)
-            count = await repo.delete_expired()
+            result = await session.execute(
+                delete(RefreshToken).where(
+                    RefreshToken.expires_at < datetime.now(timezone.utc)
+                )
+            )
             await session.commit()
+            count = result.rowcount or 0
             log.info("expired_tokens_cleaned", count=count)
             return {"deleted_count": count}
 

@@ -24,7 +24,7 @@ async def get_dashboard_kpis(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> DashboardKPIsFrontend:
-    service = DashboardService(db)
+    service = DashboardService(db, current_user.tenant_id)
     return await service.get_kpis(current_user)
 
 
@@ -33,7 +33,7 @@ async def get_freights_by_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> list[FreightStatusCount]:
-    service = DashboardService(db)
+    service = DashboardService(db, current_user.tenant_id)
     return await service.get_freights_by_status(current_user)
 
 
@@ -43,5 +43,5 @@ async def get_revenue_series(
     current_user: Annotated[User, Depends(get_current_active_user)],
     days: int = Query(default=30, ge=1, le=365),
 ) -> list[RevenuePoint]:
-    service = DashboardService(db)
+    service = DashboardService(db, current_user.tenant_id)
     return await service.get_revenue_series(current_user, days)

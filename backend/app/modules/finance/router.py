@@ -32,7 +32,7 @@ async def sync_finance_from_freights(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> dict[str, int]:
     """Gera receitas/despesas a partir de fretes, abastecimentos e custos existentes."""
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     return await service.sync_from_freights(current_user)
 
 
@@ -41,7 +41,7 @@ async def get_cash_flow(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> CashFlowResponse:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     return await service.get_cash_flow(current_user)
 
 
@@ -58,7 +58,7 @@ async def list_finance_entries(
     vencimento_from: date | None = Query(default=None),
     vencimento_to: date | None = Query(default=None),
 ) -> PagedResponse[FinanceEntryListResponse]:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(  # type: ignore[return-value]
         params, current_user, tipo, status, categoria, freight_id, vencimento_from, vencimento_to
@@ -71,7 +71,7 @@ async def create_finance_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FinanceEntryRead:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     return await service.create(payload, current_user)  # type: ignore[return-value]
 
 
@@ -81,7 +81,7 @@ async def get_finance_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FinanceEntryRead:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     return await service.get_by_id(entry_id, current_user)  # type: ignore[return-value]
 
 
@@ -92,7 +92,7 @@ async def update_finance_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FinanceEntryRead:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     return await service.update(entry_id, payload, current_user)  # type: ignore[return-value]
 
 
@@ -106,6 +106,6 @@ async def delete_finance_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = FinanceService(db)
+    service = FinanceService(db, current_user.tenant_id)
     await service.delete(entry_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -32,7 +32,7 @@ async def list_clients(
     is_active: bool | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
 ) -> PagedResponse[ClientListResponse]:
-    service = ClientService(db)
+    service = ClientService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(params, current_user, is_active, search)  # type: ignore[return-value]
 
@@ -43,7 +43,7 @@ async def create_client(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> ClientRead:
-    service = ClientService(db)
+    service = ClientService(db, current_user.tenant_id)
     return await service.create(payload, current_user)  # type: ignore[return-value]
 
 
@@ -53,7 +53,7 @@ async def get_client(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> ClientRead:
-    service = ClientService(db)
+    service = ClientService(db, current_user.tenant_id)
     return await service.get_by_id(client_id, current_user)  # type: ignore[return-value]
 
 
@@ -64,7 +64,7 @@ async def update_client(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> ClientRead:
-    service = ClientService(db)
+    service = ClientService(db, current_user.tenant_id)
     return await service.update(client_id, payload, current_user)  # type: ignore[return-value]
 
 
@@ -78,6 +78,6 @@ async def delete_client(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Response:
-    service = ClientService(db)
+    service = ClientService(db, current_user.tenant_id)
     await service.delete(client_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

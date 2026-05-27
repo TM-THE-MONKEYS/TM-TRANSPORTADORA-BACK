@@ -39,9 +39,10 @@ _STATUS_FLOW: list[FreightStatus] = [
 
 
 class FreightService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = FreightRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = FreightRepository(session, tenant_id)
 
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):

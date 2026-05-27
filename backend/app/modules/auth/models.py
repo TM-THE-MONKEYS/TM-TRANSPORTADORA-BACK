@@ -8,10 +8,10 @@ from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel
+from app.shared.base_model import BaseModel, TenantMixin
 
 
-class RefreshToken(BaseModel):
+class RefreshToken(TenantMixin, BaseModel):
     __tablename__ = "tm_refresh_tokens"
 
     user_id: Mapped[uuid.UUID] = mapped_column(

@@ -1,6 +1,8 @@
 """Dashboard service."""
 from __future__ import annotations
 
+import uuid
+
 import structlog
 from datetime import date, timedelta
 from sqlalchemy import func, select
@@ -30,8 +32,9 @@ log = structlog.get_logger(__name__)
 
 
 class DashboardService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     def _check_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR, UserRole.FINANCEIRO):
@@ -40,10 +43,10 @@ class DashboardService:
     async def _get_detailed_kpis(self, requesting_user: User) -> DashboardKPIs:
         self._check_access(requesting_user)
 
-        truck_repo = TruckRepository(self._session)
-        freight_repo = FreightRepository(self._session)
-        finance_repo = FinanceRepository(self._session)
-        maintenance_repo = MaintenanceRepository(self._session)
+        truck_repo = TruckRepository(self._session, self._tenant_id)
+        freight_repo = FreightRepository(self._session, self._tenant_id)
+        finance_repo = FinanceRepository(self._session, self._tenant_id)
+        maintenance_repo = MaintenanceRepository(self._session, self._tenant_id)
 
         truck_counts = await truck_repo.count_by_status()
         freight_counts = await freight_repo.count_by_status()
@@ -54,6 +57,7 @@ class DashboardService:
             select(func.count(Driver.id)).where(
                 Driver.deleted_at.is_(None),
                 Driver.status == DriverStatus.ATIVO,
+                Driver.tenant_id == self._tenant_id,
             )
         )
         active_drivers = active_drivers_result.scalar_one()
@@ -101,7 +105,7 @@ class DashboardService:
         self._check_access(requesting_user)
         result = await self._session.execute(
             select(Freight.status, func.count(Freight.id).label("count"))
-            .where(Freight.deleted_at.is_(None))
+            .where(Freight.deleted_at.is_(None), Freight.tenant_id == self._tenant_id)
             .group_by(Freight.status)
         )
         return [
@@ -125,6 +129,7 @@ class DashboardService:
                 FinanceEntry.tipo == FinanceEntryType.RECEITA,
                 FinanceEntry.status == FinanceEntryStatus.PAGO,
                 func.date(FinanceEntry.created_at) >= since,
+                FinanceEntry.tenant_id == self._tenant_id,
             )
             .group_by(func.date(FinanceEntry.created_at))
             .order_by(func.date(FinanceEntry.created_at))

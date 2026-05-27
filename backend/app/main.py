@@ -5,7 +5,9 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -87,6 +89,7 @@ def create_app() -> FastAPI:
 
 
 def _register_routers(app: FastAPI) -> None:
+    from app.api.v1.dependencies.database import get_db
     from app.modules.auth.router import router as auth_router
     from app.modules.clients.router import router as clients_router
     from app.modules.dashboard.router import router as dashboard_router
@@ -118,8 +121,17 @@ def _register_routers(app: FastAPI) -> None:
         app.include_router(router, prefix=prefix)
 
     @app.get("/health", tags=["health"])
-    async def health_check() -> dict[str, str]:
-        return {"status": "ok", "version": settings.app_version}
+    async def health_check(
+        db: AsyncSession = Depends(get_db),  # noqa: B008
+    ) -> dict[str, object]:
+        db_ok = False
+        try:
+            await db.execute(text("SELECT 1"))
+            db_ok = True
+        except Exception:
+            pass
+        status_val = "ok" if db_ok else "degraded"
+        return {"status": status_val, "version": settings.app_version, "database": db_ok}
 
 
 app = create_app()

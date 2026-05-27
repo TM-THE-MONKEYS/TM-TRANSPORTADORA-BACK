@@ -23,9 +23,10 @@ log = structlog.get_logger(__name__)
 
 
 class UserService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = UserRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = UserRepository(session, tenant_id)
 
     async def create(self, data: UserCreate, created_by: User) -> User:
         if created_by.role != UserRole.ADMIN:
@@ -40,6 +41,7 @@ class UserService:
             hashed_password=hash_password(data.password),
             role=data.role,
             is_active=data.is_active,
+            tenant_id=self._tenant_id,
         )
         user = await self._repo.create(user)
         await self._session.commit()

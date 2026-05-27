@@ -59,10 +59,11 @@ def build_occurrence_message(
 
 
 class NotificationService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
-        self._repo = NotificationRepository(session)
-        self._freight_repo = FreightRepository(session)
+        self._tenant_id = tenant_id
+        self._repo = NotificationRepository(session, tenant_id)
+        self._freight_repo = FreightRepository(session, tenant_id)
 
     def _check_read_access(self, user: User) -> None:
         if user.role not in _NOTIFY_ROLES:
@@ -90,6 +91,7 @@ class NotificationService:
             autor_user_id=author.id,
             autor_nome=author.nome.upper(),
             freight_code=code,
+            tenant_id=self._tenant_id,
         )
         created = await self._repo.create(notification)
         log.info(
@@ -131,6 +133,7 @@ class NotificationService:
             autor_user_id=author.id,
             autor_nome=author.nome.upper(),
             freight_code=code,
+            tenant_id=self._tenant_id,
         )
         created = await self._repo.create(notification)
         log.info(

@@ -11,14 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config.settings import get_settings
 from app.core.security.jwt import hash_refresh_token
 from app.modules.auth.models import RefreshToken
+from app.shared.base_repository import TenantBaseRepository
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
 
 
-class RefreshTokenRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+class RefreshTokenRepository(TenantBaseRepository[RefreshToken]):
+    model = RefreshToken
+
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
+        super().__init__(session, tenant_id)
 
     async def create(
         self,
@@ -32,6 +35,7 @@ class RefreshTokenRepository:
             expires_at=datetime.now(timezone.utc)
             + timedelta(days=settings.refresh_token_expire_days),
             device_info=device_info,
+            tenant_id=self._tenant_id,
         )
         self._session.add(token)
         await self._session.flush()
@@ -40,7 +44,10 @@ class RefreshTokenRepository:
     async def get_by_hash(self, raw_token: str) -> RefreshToken | None:
         token_hash = hash_refresh_token(raw_token)
         result = await self._session.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            select(RefreshToken).where(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.tenant_id == self._tenant_id,
+            )
         )
         return result.scalar_one_or_none()
 
@@ -54,6 +61,7 @@ class RefreshTokenRepository:
             .where(
                 RefreshToken.user_id == user_id,
                 RefreshToken.revoked_at.is_(None),
+                RefreshToken.tenant_id == self._tenant_id,
             )
             .values(revoked_at=datetime.now(timezone.utc))
         )

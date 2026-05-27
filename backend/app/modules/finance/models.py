@@ -8,11 +8,11 @@ from sqlalchemy import Date, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base_model import BaseModel, SoftDeleteMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType
 
 
-class FinanceEntry(SoftDeleteMixin, BaseModel):
+class FinanceEntry(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_finance_entries"
 
     tipo: Mapped[FinanceEntryType] = mapped_column(

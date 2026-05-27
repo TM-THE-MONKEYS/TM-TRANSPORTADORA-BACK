@@ -1,7 +1,7 @@
 """Sincroniza receitas e despesas de fretes com tm_finance_entries."""
 from __future__ import annotations
 
-import uuid
+import uuid  # noqa: TC003 — used at runtime in function signature
 from datetime import date, datetime, timezone
 
 from sqlalchemy import select
@@ -59,8 +59,9 @@ async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> Fin
         data_vencimento=vencimento,
         status=FinanceEntryStatus.PENDENTE,
         observacoes=source_key,
+        tenant_id=freight.tenant_id,
     )
-    return await FinanceRepository(session).create(entry)
+    return await FinanceRepository(session, freight.tenant_id).create(entry)
 
 
 async def create_fuel_expense(
@@ -91,8 +92,9 @@ async def create_fuel_expense(
         status=FinanceEntryStatus.PAGO,
         data_pagamento=payment_date or date.today(),
         observacoes=source_key,
+        tenant_id=refill.tenant_id,
     )
-    return await FinanceRepository(session).create(entry)
+    return await FinanceRepository(session, refill.tenant_id).create(entry)
 
 
 async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> FinanceEntry | None:
@@ -129,28 +131,39 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
         status=FinanceEntryStatus.PAGO,
         data_pagamento=date.today(),
         observacoes=source_key,
+        tenant_id=cost.tenant_id,
     )
-    return await FinanceRepository(session).create(entry)
+    return await FinanceRepository(session, cost.tenant_id).create(entry)
 
 
-async def sync_all_from_freights(session: AsyncSession) -> dict[str, int]:
+async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) -> dict[str, int]:
     """Backfill: receitas de fretes + despesas de abastecimentos e custos."""
     stats = {"receitas": 0, "despesas": 0}
 
     freights = (
-        await session.execute(select(Freight).where(Freight.deleted_at.is_(None)))
+        await session.execute(
+            select(Freight).where(Freight.deleted_at.is_(None), Freight.tenant_id == tenant_id)
+        )
     ).scalars().all()
     for freight in freights:
         if await ensure_freight_revenue(session, freight):
             stats["receitas"] += 1
 
-    refills = (await session.execute(select(FuelRefill))).scalars().all()
+    refills = (
+        await session.execute(
+            select(FuelRefill).where(FuelRefill.tenant_id == tenant_id)
+        )
+    ).scalars().all()
     for refill in refills:
         desc = refill.posto or refill.observacoes or f"Abastecimento {refill.litros:.0f}L"
         await create_fuel_expense(session, refill, desc)
         stats["despesas"] += 1
 
-    costs = (await session.execute(select(FreightCost))).scalars().all()
+    costs = (
+        await session.execute(
+            select(FreightCost).where(FreightCost.tenant_id == tenant_id)
+        )
+    ).scalars().all()
     for cost in costs:
         if await create_cost_expense(session, cost):
             stats["despesas"] += 1
