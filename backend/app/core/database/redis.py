@@ -1,11 +1,16 @@
 """Redis connection pool with LRU-cached client."""
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from redis.asyncio import ConnectionPool, Redis
 
 from app.core.config.settings import get_settings
+
+_log = logging.getLogger(__name__)
+
+_pool_available = True
 
 
 @lru_cache(maxsize=1)
@@ -26,7 +31,10 @@ def get_redis() -> Redis:
 
 
 async def close_redis() -> None:
-    """Close the connection pool (call on shutdown)."""
-    pool = _get_pool()
-    await pool.aclose()
-    _get_pool.cache_clear()
+    """Close the connection pool (call on shutdown). No-op if Redis is unavailable."""
+    try:
+        pool = _get_pool()
+        await pool.aclose()
+        _get_pool.cache_clear()
+    except Exception:
+        _log.debug("Redis pool not active; skipping close")

@@ -52,19 +52,29 @@ def create_app() -> FastAPI:
     # Custom middleware (order matters: last added = first executed on request)
     from app.api.v1.middleware.audit_middleware import AuditMiddleware
     from app.api.v1.middleware.logging_middleware import LoggingMiddleware
+    from app.api.v1.middleware.security_headers_middleware import (
+        SecurityHeadersMiddleware,
+    )
     app.add_middleware(AuditMiddleware)
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(SlowAPIMiddleware)
 
     # CORS last = outermost; ensures error responses include Access-Control-Allow-Origin
     cors_kwargs: dict = {
         "allow_origins": settings.cors_origins,
         "allow_credentials": True,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"],
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+        "expose_headers": ["X-Request-ID"],
+        "max_age": 600,
     }
     if settings.is_development:
         cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+        cors_kwargs["allow_methods"] = ["*"]
+        cors_kwargs["allow_headers"] = ["*"]
+    else:
+        cors_kwargs["allow_origin_regex"] = r"https://tm-transportadora(-\w+)?(-julinhohgrs-projects)?\.vercel\.app"
     app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     # Exception handlers

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # Permissions each role receives — mirrors frontend lib/rbac/permissions.ts
 _ROLE_PERMISSIONS: dict[str, list[str]] = {
@@ -81,6 +81,11 @@ class RegisterTenantRequest(BaseModel):
     password: str = Field(min_length=8)
     document: str | None = None
 
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
 
 class RefreshRequest(BaseModel):
     refresh_token: str
@@ -90,14 +95,36 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
+def _validate_password_strength(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Senha deve ter pelo menos 8 caracteres")
+    if not any(c.isupper() for c in v):
+        raise ValueError("Senha deve ter pelo menos uma letra maiúscula")
+    if not any(c.isdigit() for c in v):
+        raise ValueError("Senha deve ter pelo menos um número")
+    if not any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in v):
+        raise ValueError("Senha deve ter pelo menos um caractere especial")
+    return v
+
+
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class MessageResponse(BaseModel):

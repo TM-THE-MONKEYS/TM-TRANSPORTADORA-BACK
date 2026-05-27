@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,6 +81,28 @@ class Settings(BaseSettings):
                 return json.loads(raw)
             return [origin.strip() for origin in raw.split(",") if origin.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _enforce_production_constraints(self) -> Settings:
+        if self.app_env == "production":
+            _default = (
+                "change-me-in-production-min-32-characters-long!!"
+            )
+            if self.secret_key == _default or len(self.secret_key) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be changed from default "
+                    "and be >= 32 chars in production"
+                )
+            if self.app_debug:
+                raise ValueError(
+                    "APP_DEBUG must be false in production"
+                )
+            if self.allow_tenant_registration:
+                raise ValueError(
+                    "ALLOW_TENANT_REGISTRATION must be "
+                    "false in production"
+                )
+        return self
 
     @property
     def database_url_async(self) -> str:

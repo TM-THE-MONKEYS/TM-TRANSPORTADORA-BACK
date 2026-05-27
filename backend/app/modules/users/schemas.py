@@ -37,6 +37,8 @@ class UserCreate(BaseModel):
             raise ValueError("Senha deve ter pelo menos uma letra maiúscula")
         if not any(c.isdigit() for c in v):
             raise ValueError("Senha deve ter pelo menos um número")
+        if not any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in v):
+            raise ValueError("Senha deve ter pelo menos um caractere especial")
         return v
 
 
