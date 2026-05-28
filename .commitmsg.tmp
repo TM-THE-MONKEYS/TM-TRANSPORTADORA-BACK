@@ -1,6 +1,0 @@
-chore: remove Vercel deploy artifacts and add Railway config
-
-- Add railway.json with Docker production build and Alembic pre-deploy
-- Fix Dockerfile CMD to use Railway PORT and WEB_CONCURRENCY
-- Document production env vars in .env.example
-- Remove vercel.json, index.py, requirements.txt

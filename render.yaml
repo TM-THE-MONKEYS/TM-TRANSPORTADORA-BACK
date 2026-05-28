@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: tm-transportadora-api
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./docker/Dockerfile
+    healthCheckPath: /health
+    branch: main
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - backend/**
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: ALLOW_TENANT_REGISTRATION
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: RATE_LIMIT_AUTH_PER_MINUTE
+        value: "10"
+      - key: REDIS_URL
+        value: redis://127.0.0.1:6379/0
+      - key: CELERY_BROKER_URL
+        value: redis://127.0.0.1:6379/0
+      - key: CELERY_RESULT_BACKEND
+        value: redis://127.0.0.1:6379/1
+      - key: SUPABASE_URL
+        value: https://jkdkspbcqnfrweanmhpp.supabase.co
+      - key: CORS_ORIGINS
+        value: '["https://tm-transportadora.vercel.app","https://tm-transportadora-julinhohgrs-projects.vercel.app"]'
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
