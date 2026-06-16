@@ -12,6 +12,35 @@ def _future_date() -> str:
 
 
 @pytest.mark.asyncio
+async def test_create_driver_without_password_creates_account(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    cpf = "15350946056"
+    response = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "João Motorista",
+            "cpf": cpf,
+            "cnh": "12345678901",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "JOÃO MOTORISTA"
+    assert data["temporary_password"] is not None
+
+    login_resp = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": data["temporary_password"]},
+    )
+    assert login_resp.status_code == 200
+    assert login_resp.json()["user"]["role"] == "motorista"
+
+
+@pytest.mark.asyncio
 async def test_create_driver(
     client: AsyncClient, operador_headers: dict[str, str], operador_user: object
 ) -> None:
@@ -28,7 +57,7 @@ async def test_create_driver(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "João Motorista"
+    assert data["name"] == "JOÃO MOTORISTA"
     assert data["cnh_category"] == "E"
 
 
@@ -50,7 +79,7 @@ async def test_create_driver_with_frontend_aliases(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Maria Motorista"
+    assert data["name"] == "MARIA MOTORISTA"
     assert data["phone"] == "11988887777"
 
 

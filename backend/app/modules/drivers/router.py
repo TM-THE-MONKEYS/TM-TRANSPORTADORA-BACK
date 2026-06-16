@@ -47,8 +47,11 @@ async def create_driver(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> DriverFrontendRead:
     service = DriverService(db, current_user.tenant_id)
-    driver = await service.create(payload, current_user)
-    return DriverFrontendRead.from_orm(driver)
+    result = await service.create(payload, current_user)
+    return DriverFrontendRead.from_orm(
+        result.driver,
+        temporary_password=result.temporary_password,
+    )
 
 
 @router.get("/{driver_id}", response_model=DriverFrontendRead)

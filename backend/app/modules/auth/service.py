@@ -144,7 +144,7 @@ class AuthService:
         password: str,
         document: str | None = None,
     ) -> LoginResponse:
-        if settings.is_production and not settings.allow_tenant_registration:
+        if not settings.allow_tenant_registration:
             raise BadRequestException("Registro de tenant desabilitado")
 
         from sqlalchemy import select

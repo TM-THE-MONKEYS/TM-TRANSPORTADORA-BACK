@@ -9,21 +9,19 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from app.core.config.settings import get_settings
 from app.core.database.engine import dispose_engine
 from app.core.database.redis import close_redis
 from app.core.logging.structlog_config import configure_logging
+from app.core.rate_limit import limiter
 from app.shared.exceptions.handlers import register_exception_handlers
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
-
-limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_per_minute}/minute"])
 
 
 @asynccontextmanager
@@ -96,6 +94,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.drivers.router import router as drivers_router
     from app.modules.finance.router import router as finance_router
     from app.modules.fuel.router import router as fuel_router
+    from app.modules.tolls.router import router as tolls_router
     from app.modules.freights.router import router as freights_router
     from app.modules.maintenance.router import router as maintenance_router
     from app.modules.notifications.router import router as notifications_router
@@ -115,6 +114,7 @@ def _register_routers(app: FastAPI) -> None:
         finance_router,
         tracking_router,
         fuel_router,
+        tolls_router,
         notifications_router,
         dashboard_router,
     ]:

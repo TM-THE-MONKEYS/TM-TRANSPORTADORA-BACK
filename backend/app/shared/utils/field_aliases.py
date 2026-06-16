@@ -97,6 +97,7 @@ DRIVER_CREATE_ALIASES = {
     "phone": "telefone",
     "cnh_number": "cnh",
     "cnh_expires_at": "cnh_expiry",
+    "senha": "password",
 }
 
 DRIVER_UPDATE_ALIASES = {

@@ -14,9 +14,11 @@ from app.core.database.base import Base
 
 import app.modules.fuel.models  # noqa: F401
 import app.modules.notifications.models  # noqa: F401 — registra tabelas no metadata
+import app.modules.tolls.models  # noqa: F401
 from app.core.security.jwt import create_access_token
 from app.core.security.password import hash_password
 from app.main import create_app
+from app.modules.tenants.models import Tenant
 from app.modules.users.models import User
 from app.shared.enums import UserRole
 
@@ -78,13 +80,23 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest_asyncio.fixture
-async def admin_user(db_session: AsyncSession) -> User:
+async def test_tenant(db_session: AsyncSession) -> Tenant:
+    tenant = Tenant(nome="Tenant Test", documento="12345678000199")
+    db_session.add(tenant)
+    await db_session.commit()
+    await db_session.refresh(tenant)
+    return tenant
+
+
+@pytest_asyncio.fixture
+async def admin_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     user = User(
         nome="Admin Test",
         email="admin@test.com",
         hashed_password=hash_password("Admin@123!"),
         role=UserRole.ADMIN,
         is_active=True,
+        tenant_id=test_tenant.id,
     )
     db_session.add(user)
     await db_session.commit()
@@ -93,13 +105,14 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture
-async def operador_user(db_session: AsyncSession) -> User:
+async def operador_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     user = User(
         nome="Operador Test",
         email="operador@test.com",
         hashed_password=hash_password("Operador@123!"),
         role=UserRole.OPERADOR,
         is_active=True,
+        tenant_id=test_tenant.id,
     )
     db_session.add(user)
     await db_session.commit()
@@ -109,12 +122,14 @@ async def operador_user(db_session: AsyncSession) -> User:
 
 @pytest_asyncio.fixture
 def admin_token(admin_user: User) -> str:
-    return create_access_token(admin_user.id, admin_user.role)
+    return create_access_token(admin_user.id, admin_user.role, tenant_id=admin_user.tenant_id)
 
 
 @pytest_asyncio.fixture
 def operador_token(operador_user: User) -> str:
-    return create_access_token(operador_user.id, operador_user.role)
+    return create_access_token(
+        operador_user.id, operador_user.role, tenant_id=operador_user.tenant_id
+    )
 
 
 @pytest_asyncio.fixture
@@ -128,13 +143,14 @@ def operador_headers(operador_token: str) -> dict[str, str]:
 
 
 @pytest_asyncio.fixture
-async def motorista_user(db_session: AsyncSession) -> User:
+async def motorista_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     user = User(
         nome="Motorista Test",
         email="motorista@test.com",
         hashed_password=hash_password("Motorista@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=test_tenant.id,
     )
     db_session.add(user)
     await db_session.commit()
@@ -144,7 +160,9 @@ async def motorista_user(db_session: AsyncSession) -> User:
 
 @pytest_asyncio.fixture
 def motorista_token(motorista_user: User) -> str:
-    return create_access_token(motorista_user.id, motorista_user.role)
+    return create_access_token(
+        motorista_user.id, motorista_user.role, tenant_id=motorista_user.tenant_id
+    )
 
 
 @pytest_asyncio.fixture

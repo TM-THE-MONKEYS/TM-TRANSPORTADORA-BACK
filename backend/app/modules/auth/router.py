@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
+from app.core.config.settings import get_settings
+from app.core.rate_limit import limiter
 from app.modules.auth.schemas import (
     AuthUserResponse,
     ChangePasswordRequest,
@@ -26,26 +28,30 @@ from app.modules.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = structlog.get_logger(__name__)
+settings = get_settings()
+_auth_rate_limit = f"{settings.rate_limit_auth_per_minute}/minute"
 
 
 def _get_device_info(request: Request) -> str:
     return request.headers.get("User-Agent", "unknown")[:255]
 
 
+@limiter.limit(_auth_rate_limit)
 @router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
 async def login(
-    payload: LoginRequest,
     request: Request,
+    payload: LoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LoginResponse:
     service = AuthService(db)
     return await service.login(payload.email, payload.password, _get_device_info(request))
 
 
+@limiter.limit(_auth_rate_limit)
 @router.post("/driver/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
 async def driver_login(
-    payload: DriverLoginRequest,
     request: Request,
+    payload: DriverLoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LoginResponse:
     service = AuthService(db)
@@ -76,8 +82,10 @@ async def get_me(
     return await service.get_me(current_user)
 
 
+@limiter.limit(_auth_rate_limit)
 @router.post("/refresh", response_model=LoginResponse)
 async def refresh(
+    request: Request,
     payload: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LoginResponse:
@@ -105,8 +113,10 @@ async def logout_all(
     return MessageResponse(message="Todas as sessões encerradas")
 
 
+@limiter.limit(_auth_rate_limit)
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
+    request: Request,
     payload: ForgotPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
@@ -117,8 +127,10 @@ async def forgot_password(
     )
 
 
+@limiter.limit(_auth_rate_limit)
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(
+    request: Request,
     payload: ResetPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:

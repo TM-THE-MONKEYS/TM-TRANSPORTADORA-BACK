@@ -20,6 +20,7 @@ from app.modules.notifications.schemas import (
     UnreadCountResponse,
 )
 from app.modules.fuel.models import FuelRefill
+from app.modules.tolls.models import TollCharge
 from app.modules.tracking.models import TrackingUpdate
 from app.modules.users.models import User
 from app.shared.enums import (
@@ -144,6 +145,51 @@ class NotificationService:
         )
         return created
 
+    async def create_for_toll_charge(
+        self,
+        charge: TollCharge,
+        author: User,
+    ) -> FreightNotification:
+        code = freight_code(charge.freight_id)
+        loc_parts: list[str] = []
+        if charge.praca:
+            loc_parts.append(charge.praca.upper())
+        if charge.rodovia:
+            loc_parts.append(charge.rodovia.upper())
+        if charge.cidade:
+            loc = charge.cidade.upper()
+            if charge.estado:
+                loc += f"/{charge.estado.upper()}"
+            loc_parts.append(loc)
+        loc = f" — {' / '.join(loc_parts)}" if loc_parts else ""
+        mensagem = (
+            f"PEDÁGIO {charge.quantidade}x — R$ {charge.valor:.2f}{loc}"
+        )
+        if charge.observacoes and charge.observacoes.strip():
+            mensagem += f" — {charge.observacoes.strip().upper()}"
+
+        notification = FreightNotification(
+            freight_id=charge.freight_id,
+            toll_charge_id=charge.id,
+            tracking_update_id=None,
+            fuel_refill_id=None,
+            tipo=NotificationType.TOLL_CHARGE,
+            titulo=f"PEDÁGIO NO FRETE {code}",
+            mensagem=mensagem,
+            autor_user_id=author.id,
+            autor_nome=author.nome.upper(),
+            freight_code=code,
+            tenant_id=self._tenant_id,
+        )
+        created = await self._repo.create(notification)
+        log.info(
+            "toll_notification_created",
+            notification_id=str(created.id),
+            freight_id=str(charge.freight_id),
+            author_id=str(author.id),
+        )
+        return created
+
     async def list_notifications(
         self,
         user: User,
@@ -244,6 +290,7 @@ class NotificationService:
             freight_id=notification.freight_id,
             tracking_update_id=notification.tracking_update_id,
             fuel_refill_id=notification.fuel_refill_id,
+            toll_charge_id=notification.toll_charge_id,
             tipo=notification.tipo,
             titulo=notification.titulo,
             mensagem=notification.mensagem,

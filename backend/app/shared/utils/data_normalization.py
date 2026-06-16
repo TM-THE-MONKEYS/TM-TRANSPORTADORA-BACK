@@ -273,3 +273,13 @@ FUEL_CREATE_RULES: dict[str, NormType] = {
     "litros": "decimal",
     "km_atual": "decimal",
 }
+
+TOLL_CREATE_RULES: dict[str, NormType] = {
+    "praca": "upper",
+    "rodovia": "upper",
+    "cidade": "upper",
+    "estado": "uf",
+    "observacoes": "upper",
+    "valor": "decimal",
+    "quantidade": "integer",
+}

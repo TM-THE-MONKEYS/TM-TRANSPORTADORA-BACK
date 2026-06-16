@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.modules.auth.schemas import _validate_password_strength
 from app.shared.enums import CNHCategory, DriverStatus
 from app.shared.utils.cpf_cnpj import validate_cpf
 from app.shared.utils.data_normalization import (
@@ -34,18 +35,14 @@ class DriverCreate(BaseModel):
     status: DriverStatus = DriverStatus.ATIVO
     observacoes: str | None = None
     user_id: uuid.UUID | None = None
-    password: str = Field(min_length=8)
+    password: str | None = Field(default=None, min_length=8)
 
     @field_validator("password")
     @classmethod
-    def password_strength(cls, v: str) -> str:
-        if not any(c.isupper() for c in v):
-            raise ValueError("Senha deve ter pelo menos uma letra maiúscula")
-        if not any(c.isdigit() for c in v):
-            raise ValueError("Senha deve ter pelo menos um número")
-        if not any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in v):
-            raise ValueError("Senha deve ter pelo menos um caractere especial")
-        return v
+    def password_strength(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return _validate_password_strength(v)
 
     @model_validator(mode="before")
     @classmethod
@@ -58,7 +55,7 @@ class DriverCreate(BaseModel):
                 ("cpf", "CPF"),
                 ("cnh", "CNH"),
             ),
-            optional_nullable=("telefone", "email", "observacoes", "user_id"),
+            optional_nullable=("telefone", "email", "observacoes", "user_id", "password"),
             field_rules=DRIVER_CREATE_RULES,
         )
         if isinstance(normalized, dict):
@@ -151,9 +148,15 @@ class DriverFrontendRead(BaseModel):
     photo_url: str | None = None
     commission_pct: float | None = None
     created_at: str
+    temporary_password: str | None = None
 
     @classmethod
-    def from_orm(cls, driver: object) -> "DriverFrontendRead":
+    def from_orm(
+        cls,
+        driver: object,
+        *,
+        temporary_password: str | None = None,
+    ) -> "DriverFrontendRead":
         return cls(
             id=driver.id,  # type: ignore[attr-defined]
             name=driver.nome,  # type: ignore[attr-defined]
@@ -164,6 +167,7 @@ class DriverFrontendRead(BaseModel):
             status=driver.status,  # type: ignore[attr-defined]
             phone=driver.telefone,  # type: ignore[attr-defined]
             created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
+            temporary_password=temporary_password,
         )
 
 

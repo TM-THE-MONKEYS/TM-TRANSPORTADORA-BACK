@@ -16,6 +16,7 @@ class NotificationItemRead(BaseModel):
     freight_id: uuid.UUID
     tracking_update_id: uuid.UUID | None = None
     fuel_refill_id: uuid.UUID | None = None
+    toll_charge_id: uuid.UUID | None = None
     tipo: NotificationType
     titulo: str
     mensagem: str

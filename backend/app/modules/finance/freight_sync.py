@@ -16,6 +16,7 @@ from app.shared.enums import FinanceEntryStatus, FinanceEntryType
 
 SOURCE_REVENUE = "freight_revenue:"
 SOURCE_FUEL = "fuel_refill:"
+SOURCE_TOLL = "toll_charge:"
 SOURCE_COST = "freight_cost:"
 
 
@@ -95,6 +96,41 @@ async def create_fuel_expense(
         tenant_id=refill.tenant_id,
     )
     return await FinanceRepository(session, refill.tenant_id).create(entry)
+
+
+async def create_toll_expense(
+    session: AsyncSession,
+    charge: "TollCharge",  # type: ignore[name-defined]  # noqa: F821
+    description: str,
+) -> FinanceEntry:
+    """Despesa de pedágio vinculada ao registro de pedágio."""
+    from app.modules.tolls.models import TollCharge as _TollCharge  # local import to avoid cycle
+
+    source_key = f"{SOURCE_TOLL}{charge.id}"
+    existing = await _find_by_source(session, source_key)
+    if existing:
+        existing.valor = float(charge.valor)
+        existing.descricao = description
+        existing.freight_id = charge.freight_id
+        return existing
+
+    paid_at = charge.data_pedagio
+    payment_date: date | None = None
+    if paid_at:
+        payment_date = paid_at.date() if isinstance(paid_at, datetime) else paid_at
+
+    entry = FinanceEntry(
+        tipo=FinanceEntryType.DESPESA,
+        categoria="Pedágio",
+        descricao=description,
+        valor=float(charge.valor),
+        freight_id=charge.freight_id,
+        status=FinanceEntryStatus.PAGO,
+        data_pagamento=payment_date or date.today(),
+        observacoes=source_key,
+        tenant_id=charge.tenant_id,
+    )
+    return await FinanceRepository(session, charge.tenant_id).create(entry)
 
 
 async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> FinanceEntry | None:

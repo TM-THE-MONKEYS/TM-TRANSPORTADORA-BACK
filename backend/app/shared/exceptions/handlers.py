@@ -9,12 +9,40 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from jose import JWTError
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.config.settings import get_settings
 from app.shared.exceptions.custom import AppException
 
 log = structlog.get_logger()
+
+_SENSITIVE_FIELD_NAMES = frozenset({
+    "password",
+    "current_password",
+    "new_password",
+    "refresh_token",
+    "token",
+})
+
+
+def _sanitize_validation_errors(errors: list[Any]) -> list[Any]:
+    """Remove sensitive field values from Pydantic validation errors."""
+    sanitized: list[Any] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            sanitized.append(error)
+            continue
+        clean = dict(error)
+        loc = clean.get("loc", ())
+        field_name = loc[-1] if loc else None
+        if field_name in _SENSITIVE_FIELD_NAMES:
+            clean.pop("input", None)
+            if isinstance(clean.get("ctx"), dict):
+                clean["ctx"] = {
+                    k: v for k, v in clean["ctx"].items() if k not in _SENSITIVE_FIELD_NAMES
+                }
+        sanitized.append(clean)
+    return sanitized
 
 _DEV_ORIGIN_RE = re.compile(r"https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
@@ -72,7 +100,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        errors = _make_json_safe(exc.errors())
+        errors = _sanitize_validation_errors(_make_json_safe(exc.errors()))
         log.warning(
             "validation_error",
             errors=errors,
@@ -86,22 +114,33 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return _error_response(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token", request)
 
+    @app.exception_handler(IntegrityError)
+    async def integrity_exception_handler(
+        request: Request, exc: IntegrityError
+    ) -> JSONResponse:
+        message = str(exc.__cause__ or exc).lower()
+        if "cpf" in message:
+            detail = "CPF já cadastrado"
+        elif "cnh" in message:
+            detail = "CNH já cadastrada"
+        elif "email" in message:
+            detail = "Email já cadastrado"
+        else:
+            detail = "Registro duplicado"
+        log.warning("integrity_error", detail=detail, path=request.url.path)
+        return _error_response(status.HTTP_409_CONFLICT, detail, request)
+
     @app.exception_handler(SQLAlchemyError)
     async def sqlalchemy_exception_handler(
         request: Request, exc: SQLAlchemyError
     ) -> JSONResponse:
-        settings = get_settings()
         log.error(
             "database_error",
             exc_type=type(exc).__name__,
             exc_message=str(exc.__cause__ or exc),
             path=request.url.path,
         )
-        detail = (
-            str(exc.__cause__ or exc)
-            if settings.is_development
-            else "Banco de dados indisponível. Verifique DATABASE_URL no .env do backend."
-        )
+        detail = "Banco de dados indisponível. Verifique DATABASE_URL no .env do backend."
         return _error_response(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail,

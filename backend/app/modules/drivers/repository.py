@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.drivers.models import Driver
@@ -31,6 +32,20 @@ class DriverRepository(TenantBaseRepository[Driver]):
             self._base_query().where(Driver.cnh == cnh)
         )
         return result.scalar_one_or_none()
+
+    async def exists_by_cpf(self, cpf: str) -> bool:
+        """Global check — CPF unique constraint is not scoped by tenant."""
+        result = await self._session.execute(
+            select(Driver.id).where(Driver.cpf == cpf)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def exists_by_cnh(self, cnh: str) -> bool:
+        """Global check — CNH unique constraint is not scoped by tenant."""
+        result = await self._session.execute(
+            select(Driver.id).where(Driver.cnh == cnh)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def list(
         self,

@@ -1,9 +1,12 @@
 """Driver service."""
 from __future__ import annotations
 
+import secrets
 import uuid
+from dataclasses import dataclass
 
 import structlog
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security.password import hash_password
@@ -24,6 +27,17 @@ from app.shared.security.resource_access import assert_catalog_read_access
 log = structlog.get_logger(__name__)
 
 
+def _generate_temporary_password() -> str:
+    """Gera senha temporária segura quando o frontend não envia password."""
+    return secrets.token_urlsafe(16)
+
+
+@dataclass
+class DriverCreateResult:
+    driver: Driver
+    temporary_password: str | None = None
+
+
 class DriverService:
     def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         self._session = session
@@ -35,22 +49,28 @@ class DriverService:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):
             raise ForbiddenException("Acesso negado")
 
-    async def create(self, data: DriverCreate, created_by: User) -> Driver:
+    async def create(self, data: DriverCreate, created_by: User) -> DriverCreateResult:
         self._check_write_access(created_by)
-        if await self._repo.get_by_cpf(data.cpf):
+        if await self._repo.exists_by_cpf(data.cpf):
             raise ConflictException("CPF já cadastrado")
-        if await self._repo.get_by_cnh(data.cnh):
+        if await self._repo.exists_by_cnh(data.cnh):
             raise ConflictException("CNH já cadastrada")
 
-        driver_email = data.email or f"{data.cpf}@motorista.local"
-        existing_user = await self._user_repo.get_by_email(driver_email)
-        if existing_user:
+        driver_email = (data.email or f"{data.cpf}@motorista.local").lower()
+        if await self._user_repo.exists_by_email_global(driver_email):
             raise ConflictException("Email já cadastrado para outro usuário")
+
+        temporary_password: str | None = None
+        if data.password:
+            password = data.password
+        else:
+            password = _generate_temporary_password()
+            temporary_password = password
 
         driver_user = User(
             nome=data.nome,
             email=driver_email,
-            hashed_password=hash_password(data.password),
+            hashed_password=hash_password(password),
             role=UserRole.MOTORISTA,
             is_active=True,
             tenant_id=self._tenant_id,
@@ -61,15 +81,28 @@ class DriverService:
 
         driver_data = data.model_dump(exclude={"password"})
         driver_data["user_id"] = driver_user.id
+        driver_data["email"] = data.email
         driver = Driver(**driver_data)
         driver = await self._repo.create(driver)
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            message = str(exc.__cause__ or exc).lower()
+            if "cpf" in message:
+                raise ConflictException("CPF já cadastrado") from exc
+            if "cnh" in message:
+                raise ConflictException("CNH já cadastrada") from exc
+            if "email" in message:
+                raise ConflictException("Email já cadastrado para outro usuário") from exc
+            raise
         log.info(
             "driver_created_with_account",
             driver_id=str(driver.id),
             user_id=str(driver_user.id),
+            temporary_password_issued=temporary_password is not None,
         )
-        return driver
+        return DriverCreateResult(driver=driver, temporary_password=temporary_password)
 
     async def get_by_id(self, driver_id: uuid.UUID, requesting_user: User) -> Driver:
         assert_catalog_read_access(requesting_user)

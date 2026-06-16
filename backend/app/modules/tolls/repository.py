@@ -1,0 +1,127 @@
+"""Toll charge repository."""
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.freights.models import Freight
+from app.modules.tolls.models import TollCharge
+from app.shared.base_repository import TenantBaseRepository
+from app.shared.enums import ACTIVE_FREIGHT_STATUSES
+
+
+class TollRepository(TenantBaseRepository[TollCharge]):
+    model = TollCharge
+
+    def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
+        super().__init__(session, tenant_id)
+
+    async def list_all(
+        self,
+        *,
+        driver_id: uuid.UUID | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[TollCharge], int]:
+        base = (
+            select(TollCharge)
+            .join(Freight, TollCharge.freight_id == Freight.id)
+            .where(Freight.deleted_at.is_(None), TollCharge.tenant_id == self._tenant_id)
+        )
+        if driver_id is not None:
+            base = base.where(TollCharge.driver_id == driver_id)
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar_one()
+
+        result = await self._session.execute(
+            base.order_by(TollCharge.data_pedagio.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    async def list_by_freight(
+        self,
+        freight_id: uuid.UUID,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[TollCharge], int]:
+        base = select(TollCharge).where(
+            TollCharge.freight_id == freight_id,
+            TollCharge.tenant_id == self._tenant_id,
+        )
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar_one()
+
+        result = await self._session.execute(
+            base.order_by(TollCharge.data_pedagio.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    async def summarize_freight(self, freight_id: uuid.UUID) -> tuple[float, int, int]:
+        result = await self._session.execute(
+            select(
+                func.coalesce(func.sum(TollCharge.valor), 0.0),
+                func.coalesce(func.sum(TollCharge.quantidade), 0),
+                func.count(TollCharge.id),
+            ).where(
+                TollCharge.freight_id == freight_id,
+                TollCharge.tenant_id == self._tenant_id,
+            )
+        )
+        row = result.one()
+        return float(row[0]), int(row[1]), int(row[2])
+
+    async def get_active_freight_for_driver_user(
+        self, user_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        from app.modules.drivers.models import Driver
+
+        driver_result = await self._session.execute(
+            select(Driver.id).where(
+                Driver.user_id == user_id,
+                Driver.tenant_id == self._tenant_id,
+            )
+        )
+        driver_id = driver_result.scalar_one_or_none()
+        if not driver_id:
+            return None
+
+        freight_result = await self._session.execute(
+            select(Freight.id)
+            .where(
+                Freight.driver_id == driver_id,
+                Freight.status.in_(ACTIVE_FREIGHT_STATUSES),
+                Freight.deleted_at.is_(None),
+                Freight.tenant_id == self._tenant_id,
+            )
+            .order_by(Freight.updated_at.desc())
+            .limit(1)
+        )
+        return freight_result.scalar_one_or_none()
+
+    async def list_eligible_freights(
+        self,
+        *,
+        driver_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Freight], int]:
+        base = select(Freight).where(
+            Freight.status.in_(ACTIVE_FREIGHT_STATUSES),
+            Freight.deleted_at.is_(None),
+            Freight.driver_id.isnot(None),
+            Freight.tenant_id == self._tenant_id,
+        )
+        if driver_id is not None:
+            base = base.where(Freight.driver_id == driver_id)
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar_one()
+
+        result = await self._session.execute(
+            base.order_by(Freight.updated_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total

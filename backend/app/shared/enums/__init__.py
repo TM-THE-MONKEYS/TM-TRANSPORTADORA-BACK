@@ -70,6 +70,7 @@ class TrackingStatus(StrEnum):
 class NotificationType(StrEnum):
     TRACKING_OCCURRENCE = "tracking_occurrence"
     FUEL_REFILL = "fuel_refill"
+    TOLL_CHARGE = "toll_charge"
 
 
 # Frete em viagem — motorista pode registrar abastecimento/ocorrências

@@ -63,3 +63,16 @@ class UserRepository(TenantBaseRepository[User]):
             query = query.where(User.id != exclude_id)
         result = await self._session.execute(query)
         return result.scalar_one_or_none() is not None
+
+    async def exists_by_email_global(
+        self, email: str, exclude_id: uuid.UUID | None = None
+    ) -> bool:
+        """Global check — email unique constraint is not scoped by tenant."""
+        query = select(User.id).where(
+            User.email == email.lower(),
+            User.deleted_at.is_(None),
+        )
+        if exclude_id:
+            query = query.where(User.id != exclude_id)
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none() is not None

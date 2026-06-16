@@ -35,6 +35,12 @@ class FreightNotification(TenantMixin, BaseModel):
         nullable=True,
         unique=True,
     )
+    toll_charge_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tm_toll_charges.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
     tipo: Mapped[NotificationType] = mapped_column(
         Enum(
             NotificationType,
