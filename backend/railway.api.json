@@ -5,6 +5,9 @@
     "dockerfilePath": "docker/Dockerfile"
   },
   "deploy": {
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "preDeployCommand": "alembic upgrade head",
     "restartPolicyType": "ON_FAILURE"
   }
 }

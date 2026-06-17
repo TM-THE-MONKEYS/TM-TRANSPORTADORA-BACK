@@ -87,11 +87,11 @@ Ao criar um motorista **sem enviar password**, a resposta agora inclui:
 
 | Serviço | Tipo | Config | Status |
 |---|---|---|---|
-| `api` | FastAPI (Dockerfile production) | `railway.json` | ✅ Running |
+| `api` | FastAPI (Dockerfile production) | `railway.api.json` | ✅ Running |
 | `Redis` | Redis 8.2.1 | — | ✅ Running |
 | `worker` | Celery worker (Dockerfile.worker) | `railway.worker.json` | ✅ Running |
 
-> O worker usa `railway.worker.json` (sem healthcheck HTTP e sem `preDeployCommand`), pois o Celery não expõe endpoint `/health`.
+> O `railway.json` base não define healthcheck nem migrations. A API usa `railway.api.json` (com `/health` e `alembic upgrade head`). O worker usa `railway.worker.json` (sem HTTP healthcheck).
 
 ### Variáveis de ambiente configuradas
 
