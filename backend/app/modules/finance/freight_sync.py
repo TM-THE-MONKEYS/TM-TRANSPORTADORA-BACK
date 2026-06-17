@@ -11,6 +11,7 @@ from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
 from app.modules.freights.models import Freight, FreightCost
 from app.modules.fuel.models import FuelRefill
+from app.modules.tolls.models import TollCharge
 from app.modules.notifications.service import freight_code
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType
 
@@ -100,11 +101,10 @@ async def create_fuel_expense(
 
 async def create_toll_expense(
     session: AsyncSession,
-    charge: "TollCharge",  # type: ignore[name-defined]  # noqa: F821
+    charge: TollCharge,
     description: str,
 ) -> FinanceEntry:
     """Despesa de pedágio vinculada ao registro de pedágio."""
-    from app.modules.tolls.models import TollCharge as _TollCharge  # local import to avoid cycle
 
     source_key = f"{SOURCE_TOLL}{charge.id}"
     existing = await _find_by_source(session, source_key)
@@ -144,6 +144,13 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
             select(FuelRefill.id).where(FuelRefill.freight_cost_id == cost.id).limit(1)
         )
         if linked.scalar_one_or_none():
+            return None
+
+    if "PEDAGIO" in tipo_norm:
+        linked_toll = await session.execute(
+            select(TollCharge.id).where(TollCharge.freight_cost_id == cost.id).limit(1)
+        )
+        if linked_toll.scalar_one_or_none():
             return None
 
     source_key = f"{SOURCE_COST}{cost.id}"
