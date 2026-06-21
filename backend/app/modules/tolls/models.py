@@ -22,12 +22,13 @@ class TollCharge(TenantMixin, BaseModel):
         nullable=False,
         index=True,
     )
-    driver_id: Mapped[uuid.UUID] = mapped_column(
+    driver_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("tm_drivers.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("tm_drivers.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
+    driver_nome: Mapped[str | None] = mapped_column(String(150), nullable=True)
     registrado_por_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tm_users.id", ondelete="SET NULL"),

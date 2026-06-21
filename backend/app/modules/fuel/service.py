@@ -95,11 +95,12 @@ class FuelService:
         truck.km_atual = km
 
     async def _enrich_read(self, refill: FuelRefill) -> FuelRefillRead:
-        driver_name: str | None = None
+        driver_name: str | None = refill.driver_nome
         truck_plate: str | None = None
         if refill.driver_id:
             driver = await self._session.get(Driver, refill.driver_id)
-            driver_name = driver.nome if driver else None
+            if driver:
+                driver_name = driver.nome
         if refill.truck_id:
             truck = await self._session.get(Truck, refill.truck_id)
             truck_plate = truck.placa if truck else None
@@ -142,6 +143,8 @@ class FuelService:
         await self._check_freight_active_for_refill(freight)
         driver_id = await self._resolve_driver_id(freight, data.driver_id, author)
         truck_id = data.truck_id or freight.truck_id
+        driver = await self._session.get(Driver, driver_id)
+        driver_nome = driver.nome if driver else None
 
         litros = float(data.litros)
         valor_total = float(data.valor_total)
@@ -163,6 +166,7 @@ class FuelService:
         refill = FuelRefill(
             freight_id=freight.id,
             driver_id=driver_id,
+            driver_nome=driver_nome,
             truck_id=truck_id,
             registrado_por_user_id=author.id,
             freight_cost_id=cost.id,

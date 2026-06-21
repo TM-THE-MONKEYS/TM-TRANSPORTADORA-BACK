@@ -79,10 +79,11 @@ class TollService:
             )
 
     async def _enrich_read(self, charge: TollCharge) -> TollChargeRead:
-        driver_name: str | None = None
+        driver_name: str | None = charge.driver_nome
         if charge.driver_id:
             driver = await self._session.get(Driver, charge.driver_id)
-            driver_name = driver.nome if driver else None
+            if driver:
+                driver_name = driver.nome
 
         return TollChargeRead(
             id=charge.id,
@@ -114,6 +115,8 @@ class TollService:
         await assert_freight_read_access(self._session, freight, author)
         await self._check_freight_active(freight)
         driver_id = await self._resolve_driver_id(freight, data.driver_id, author)
+        driver = await self._session.get(Driver, driver_id)
+        driver_nome = driver.nome if driver else None
 
         valor = float(data.valor)
         quantidade = int(data.quantidade)
@@ -132,6 +135,7 @@ class TollService:
         charge = TollCharge(
             freight_id=freight.id,
             driver_id=driver_id,
+            driver_nome=driver_nome,
             registrado_por_user_id=author.id,
             freight_cost_id=cost.id,
             valor=valor,

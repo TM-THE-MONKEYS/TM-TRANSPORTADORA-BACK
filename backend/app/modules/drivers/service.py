@@ -134,6 +134,15 @@ class DriverService:
     async def delete(self, driver_id: uuid.UUID, deleted_by: User) -> None:
         self._check_write_access(deleted_by)
         driver = await self.get_by_id(driver_id, deleted_by)
-        await self._repo.soft_delete(driver)
+        user_id = driver.user_id
+        await self._repo.hard_delete(driver)
+        if user_id:
+            linked_user = await self._user_repo.get_by_id(user_id)
+            if linked_user:
+                await self._session.delete(linked_user)
         await self._session.commit()
-        log.info("driver_deleted", driver_id=str(driver_id))
+        log.info(
+            "driver_deleted",
+            driver_id=str(driver_id),
+            user_id=str(user_id) if user_id else None,
+        )

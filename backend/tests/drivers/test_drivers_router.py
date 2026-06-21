@@ -5,6 +5,12 @@ from datetime import date, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.clients.models import Client
+from app.modules.freights.models import Freight
+from app.modules.tenants.models import Tenant
+from app.shared.enums import FreightStatus
 
 
 def _future_date() -> str:
@@ -130,6 +136,102 @@ async def test_list_drivers(
     data = response.json()
     assert "items" in data
     assert "total" in data
+
+
+@pytest.mark.asyncio
+async def test_delete_driver_allows_recreating_same_cpf(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    cpf = "11144477735"
+    cnh = "11223344556"
+    payload = {
+        "nome": "Motorista Temporário",
+        "cpf": cpf,
+        "cnh": cnh,
+        "cnh_category": "E",
+        "cnh_expiry": _future_date(),
+    }
+    create_resp = await client.post("/api/v1/drivers", json=payload, headers=operador_headers)
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    del_resp = await client.delete(f"/api/v1/drivers/{driver_id}", headers=operador_headers)
+    assert del_resp.status_code == 204
+
+    get_resp = await client.get(f"/api/v1/drivers/{driver_id}", headers=operador_headers)
+    assert get_resp.status_code == 404
+
+    recreate_resp = await client.post("/api/v1/drivers", json=payload, headers=operador_headers)
+    assert recreate_resp.status_code == 201
+    assert recreate_resp.json()["cpf"] == cpf
+
+
+@pytest.mark.asyncio
+async def test_delete_driver_preserves_fuel_refill(
+    client: AsyncClient,
+    operador_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Motorista Com Abastecimento",
+            "cpf": "39053344705",
+            "cnh": "99887766554",
+            "cnh_category": "D",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+    driver_name = create_resp.json()["name"]
+
+    client_row = Client(
+        nome="Cliente Histórico",
+        cpf_cnpj="11222333000181",
+        is_active=True,
+        tenant_id=test_tenant.id,
+    )
+    db_session.add(client_row)
+    await db_session.flush()
+
+    freight = Freight(
+        client_id=client_row.id,
+        driver_id=driver_id,
+        origem={"cidade": "CURITIBA", "estado": "PR", "logradouro": "RUA A"},
+        destino={"cidade": "FLORIANÓPOLIS", "estado": "SC", "logradouro": "RUA B"},
+        valor_frete=5000.0,
+        status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=test_tenant.id,
+    )
+    db_session.add(freight)
+    await db_session.commit()
+    await db_session.refresh(freight)
+
+    fuel_resp = await client.post(
+        "/api/v1/fuel",
+        json={
+            "freight_id": str(freight.id),
+            "driver_id": driver_id,
+            "litros": 100,
+            "valor_total": 500,
+        },
+        headers=operador_headers,
+    )
+    assert fuel_resp.status_code == 201
+    fuel_id = fuel_resp.json()["id"]
+
+    del_resp = await client.delete(f"/api/v1/drivers/{driver_id}", headers=operador_headers)
+    assert del_resp.status_code == 204
+
+    fuel_get = await client.get(f"/api/v1/fuel/{fuel_id}", headers=operador_headers)
+    assert fuel_get.status_code == 200
+    fuel_data = fuel_get.json()
+    assert fuel_data["driver_id"] is None
+    assert fuel_data["driver_name"] == driver_name
+    assert fuel_data["litros"] == 100
 
 
 @pytest.mark.asyncio

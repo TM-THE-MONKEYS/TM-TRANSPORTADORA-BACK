@@ -66,3 +66,8 @@ class DriverRepository(TenantBaseRepository[Driver]):
             query.order_by(Driver.nome).offset(params.offset).limit(params.limit)
         )
         return list(result.scalars().all()), total
+
+    async def hard_delete(self, driver: Driver) -> None:
+        """Remove motorista; abastecimentos/pedágios/fretes preservam histórico (FK SET NULL)."""
+        await self._session.delete(driver)
+        await self._session.flush()

@@ -69,7 +69,7 @@ class FuelRefillRead(BaseModel):
 
     id: uuid.UUID
     freight_id: uuid.UUID
-    driver_id: uuid.UUID
+    driver_id: uuid.UUID | None
     truck_id: uuid.UUID | None
     registrado_por_user_id: uuid.UUID | None
     freight_cost_id: uuid.UUID | None
