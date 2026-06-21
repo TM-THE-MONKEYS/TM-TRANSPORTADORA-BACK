@@ -16,7 +16,6 @@ IGNORED_FRONTEND_FIELDS = frozenset({
     "created_at",
     "updated_at",
     "photo_url",
-    "commission_pct",
     "customer_name",
     "code",
 })

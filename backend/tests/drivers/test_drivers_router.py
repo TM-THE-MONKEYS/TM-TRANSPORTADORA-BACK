@@ -244,3 +244,33 @@ async def test_get_driver_not_found(
         headers=admin_headers,
     )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_driver_commission_pct(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "name": "Comissão Teste",
+            "cpf": "11144477735",
+            "cnh_number": "55566677788",
+            "cnh_category": "E",
+            "cnh_expires_at": _future_date(),
+            "commission_pct": 12.5,
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    data = create_resp.json()
+    assert data["commission_pct"] == 12.5
+    driver_id = data["id"]
+
+    patch_resp = await client.patch(
+        f"/api/v1/drivers/{driver_id}",
+        json={"commission_pct": 15},
+        headers=operador_headers,
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["commission_pct"] == 15.0

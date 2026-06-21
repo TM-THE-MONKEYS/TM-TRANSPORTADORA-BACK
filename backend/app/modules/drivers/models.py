@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, Enum, ForeignKey, String, Text
+from sqlalchemy import Date, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,3 +37,4 @@ class Driver(TenantMixin, SoftDeleteMixin, BaseModel):
         default=DriverStatus.ATIVO,
     )
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commission_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)

@@ -34,6 +34,7 @@ class DriverCreate(BaseModel):
     cnh_expiry: date
     status: DriverStatus = DriverStatus.ATIVO
     observacoes: str | None = None
+    commission_pct: float | None = Field(default=None, ge=0, le=100)
     user_id: uuid.UUID | None = None
     password: str | None = Field(default=None, min_length=8)
 
@@ -55,7 +56,14 @@ class DriverCreate(BaseModel):
                 ("cpf", "CPF"),
                 ("cnh", "CNH"),
             ),
-            optional_nullable=("telefone", "email", "observacoes", "user_id", "password"),
+            optional_nullable=(
+                "telefone",
+                "email",
+                "observacoes",
+                "commission_pct",
+                "user_id",
+                "password",
+            ),
             field_rules=DRIVER_CREATE_RULES,
         )
         if isinstance(normalized, dict):
@@ -86,6 +94,7 @@ class DriverUpdate(BaseModel):
     cnh_expiry: date | None = None
     status: DriverStatus | None = None
     observacoes: str | None = None
+    commission_pct: float | None = Field(default=None, ge=0, le=100)
 
     @model_validator(mode="before")
     @classmethod
@@ -114,6 +123,7 @@ class DriverRead(BaseModel):
     cnh_expiry: date
     status: DriverStatus
     observacoes: str | None
+    commission_pct: float | None
     created_at: datetime
     updated_at: datetime
 
@@ -166,6 +176,11 @@ class DriverFrontendRead(BaseModel):
             cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
             status=driver.status,  # type: ignore[attr-defined]
             phone=driver.telefone,  # type: ignore[attr-defined]
+            commission_pct=(
+                float(driver.commission_pct)  # type: ignore[attr-defined]
+                if driver.commission_pct is not None  # type: ignore[attr-defined]
+                else None
+            ),
             created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
             temporary_password=temporary_password,
         )
@@ -180,6 +195,7 @@ class DriverFrontendListItem(BaseModel):
     cnh_category: str
     cnh_expires_at: str
     status: DriverStatus
+    commission_pct: float | None = None
     created_at: str
 
     @classmethod
@@ -192,5 +208,10 @@ class DriverFrontendListItem(BaseModel):
             cnh_category=driver.cnh_category,  # type: ignore[attr-defined]
             cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
             status=driver.status,  # type: ignore[attr-defined]
+            commission_pct=(
+                float(driver.commission_pct)  # type: ignore[attr-defined]
+                if driver.commission_pct is not None  # type: ignore[attr-defined]
+                else None
+            ),
             created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
         )
