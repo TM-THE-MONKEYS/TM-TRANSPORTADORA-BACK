@@ -18,6 +18,13 @@ class TruckStatus(StrEnum):
     INATIVO = "inativo"
 
 
+class ImplementType(StrEnum):
+    CARRETA = "carreta"
+    BAU = "bau"
+    TANQUE = "tanque"
+    PRANCHA = "prancha"
+
+
 class DriverStatus(StrEnum):
     ATIVO = "ativo"
     INATIVO = "inativo"

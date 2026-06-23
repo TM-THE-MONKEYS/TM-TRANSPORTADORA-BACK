@@ -125,3 +125,61 @@ async def test_update_truck_status(
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["status"] in ("em_manutencao", "disponivel")
+
+
+@pytest.mark.asyncio
+async def test_truck_implements_crud(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    create_truck = await client.post(
+        "/api/v1/trucks",
+        json={
+            "placa": "IMP1234",
+            "modelo": "FH 540",
+            "marca": "Volvo",
+            "ano": 2022,
+            "capacidade_kg": 25000.0,
+        },
+        headers=operador_headers,
+    )
+    truck_id = create_truck.json()["id"]
+
+    create_imp = await client.post(
+        f"/api/v1/trucks/{truck_id}/implements",
+        json={
+            "name": "Carreta LS",
+            "type": "carreta",
+            "plate": "XYZ9A87",
+            "brand": "Randon",
+            "model": "SR BAU",
+            "capacity_kg": 30000,
+        },
+        headers=operador_headers,
+    )
+    assert create_imp.status_code == 201
+    imp = create_imp.json()
+    assert imp["name"] == "CARRETA LS"
+    assert imp["type"] == "carreta"
+    assert imp["plate"] == "XYZ9A87"
+    implement_id = imp["id"]
+
+    list_resp = await client.get(
+        f"/api/v1/trucks/{truck_id}/implements",
+        headers=operador_headers,
+    )
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 1
+
+    patch_resp = await client.patch(
+        f"/api/v1/trucks/{truck_id}/implements/{implement_id}",
+        json={"capacity_kg": 32000},
+        headers=operador_headers,
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["capacity_kg"] == 32000
+
+    delete_resp = await client.delete(
+        f"/api/v1/trucks/{truck_id}/implements/{implement_id}",
+        headers=operador_headers,
+    )
+    assert delete_resp.status_code == 204

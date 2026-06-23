@@ -206,6 +206,24 @@ TRUCK_UPDATE_RULES: dict[str, NormType] = {
     "observacoes": "upper",
 }
 
+IMPLEMENT_CREATE_RULES: dict[str, NormType] = {
+    "nome": "upper",
+    "placa": "plate",
+    "identificador": "upper_alnum",
+    "marca": "upper",
+    "modelo": "upper",
+    "capacidade_kg": "decimal",
+}
+
+IMPLEMENT_UPDATE_RULES: dict[str, NormType] = {
+    "nome": "upper",
+    "placa": "plate",
+    "identificador": "upper_alnum",
+    "marca": "upper",
+    "modelo": "upper",
+    "capacidade_kg": "decimal",
+}
+
 CLIENT_CREATE_RULES: dict[str, NormType] = {
     "nome": "upper",
     "cpf_cnpj": "digits",

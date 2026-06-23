@@ -122,3 +122,23 @@ TRUCK_UPDATE_ALIASES = {
     "avg_consumption_km_l": "consumo_km_l",
     "mileage_km": "km_atual",
 }
+
+IMPLEMENT_CREATE_ALIASES = {
+    "name": "nome",
+    "type": "tipo",
+    "plate": "placa",
+    "identifier": "identificador",
+    "capacity_kg": "capacidade_kg",
+    "brand": "marca",
+    "model": "modelo",
+}
+
+IMPLEMENT_UPDATE_ALIASES = {
+    "name": "nome",
+    "type": "tipo",
+    "plate": "placa",
+    "identifier": "identificador",
+    "capacity_kg": "capacidade_kg",
+    "brand": "marca",
+    "model": "modelo",
+}
