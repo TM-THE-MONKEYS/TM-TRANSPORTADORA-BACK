@@ -410,3 +410,40 @@ NEXT_PUBLIC_API_URL=https://api-production-a071.up.railway.app/api/v1
 | Todos os outros | 0 (limpos) |
 
 Todas as tabelas foram mantidas. Apenas os dados de teste foram removidos.
+
+---
+
+## 8. Branches e deploy (dev → main)
+
+### Fluxo Git
+
+| Branch | Uso |
+|--------|-----|
+| **`dev`** | Desenvolvimento — push diário |
+| **`main`** | Produção — merge via PR após testes locais |
+
+### Railway (`tm-transportadora-back`)
+
+Serviços **api** e **worker** estão configurados com:
+
+- Repositório: `TM-THE-MONKEYS/TM-TRANSPORTADORA-BACK`
+- **Branch de deploy: `main`** (root: `backend`)
+- Redis: imagem Docker (sem Git)
+
+Auto-deploy via GitHub exige **Railway GitHub App** instalada no repositório (Settings → GitHub no projeto). Com a app ativa, apenas pushes em **`main`** devem disparar deploy em production.
+
+Deploy manual (CLI/MCP) só quando solicitado, sempre a partir de **`main`** atualizada.
+
+### Vercel (frontend)
+
+- Produção deve refletir apenas **`main`**.
+- `vercel.json` desabilita auto-deploy Git para `dev` e demais branches; **`main`** permanece habilitada.
+- Repositório privado em **organização** no plano Hobby pode exigir **Vercel Pro** para integração Git completa. Sem Pro: deploy manual `vercel deploy --prod` a partir de `main` mergeada.
+
+### Checklist antes do merge em main
+
+1. Testes locais (front + API local)
+2. PR `dev` → `main` revisada
+3. Merge em `main`
+4. Confirmar deploy Railway/Vercel (automático ou manual conforme plano)
+
