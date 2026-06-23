@@ -60,9 +60,9 @@ function Start-DockerDesktopIfNeeded {
 Write-Host 'Verificando Docker...' -ForegroundColor Cyan
 $rebootPending = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
     -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
-if ($rebootPending) {
-    Write-Host 'Reinicio do Windows pendente (WSL/Docker). Reinicie antes de continuar.' -ForegroundColor Red
-    exit 1
+if ($rebootPending -and $rebootPending.PendingFileRenameOperations) {
+    Write-Host 'Aviso: Windows marcou reinicio pendente (atualizacoes/WSL).' -ForegroundColor Yellow
+    Write-Host 'Se o Docker abaixo responder OK, pode continuar sem reiniciar o PC.' -ForegroundColor DarkGray
 }
 
 if (-not (Test-DockerDaemon)) {

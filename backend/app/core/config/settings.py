@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
 
+    # Uploads (documentos motorista, etc.)
+    upload_dir: str = "uploads"
+    upload_max_bytes: int = 5 * 1024 * 1024
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:

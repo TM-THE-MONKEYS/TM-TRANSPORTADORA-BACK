@@ -176,6 +176,7 @@ class DriverFrontendRead(BaseModel):
             cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
             status=driver.status,  # type: ignore[attr-defined]
             phone=driver.telefone,  # type: ignore[attr-defined]
+            photo_url=getattr(driver, "foto_url", None),  # type: ignore[attr-defined]
             commission_pct=(
                 float(driver.commission_pct)  # type: ignore[attr-defined]
                 if driver.commission_pct is not None  # type: ignore[attr-defined]

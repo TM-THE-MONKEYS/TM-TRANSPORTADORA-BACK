@@ -23,6 +23,14 @@ class ImplementType(StrEnum):
     BAU = "bau"
     TANQUE = "tanque"
     PRANCHA = "prancha"
+    CAMERA_FRIA = "camera_fria"
+
+
+class DriverDocumentType(StrEnum):
+    PHOTO = "photo"
+    CNH_FRONT = "cnh_front"
+    CNH_BACK = "cnh_back"
+    OTHER = "other"
 
 
 class DriverStatus(StrEnum):

@@ -274,3 +274,68 @@ async def test_create_and_update_driver_commission_pct(
     )
     assert patch_resp.status_code == 200
     assert patch_resp.json()["commission_pct"] == 15.0
+
+
+@pytest.mark.asyncio
+async def test_driver_document_upload_list_download_delete(
+    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "name": "Docs Teste",
+            "cpf": "39053344705",
+            "cnh_number": "99887766554",
+            "cnh_category": "E",
+            "cnh_expires_at": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+        b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc"
+        b"\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    upload_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/documents",
+        headers=operador_headers,
+        files={"file": ("cnh.png", png_bytes, "image/png")},
+        data={"document_type": "cnh_front", "label": "CNH frente"},
+    )
+    assert upload_resp.status_code == 201
+    doc = upload_resp.json()
+    assert doc["type"] == "cnh_front"
+    assert doc["filename"] == "cnh.png"
+    assert doc["file_size"] == len(png_bytes)
+    document_id = doc["id"]
+
+    list_resp = await client.get(
+        f"/api/v1/drivers/{driver_id}/documents",
+        headers=operador_headers,
+    )
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 1
+
+    file_resp = await client.get(
+        f"/api/v1/drivers/{driver_id}/documents/{document_id}/file",
+        headers=operador_headers,
+    )
+    assert file_resp.status_code == 200
+    assert file_resp.content == png_bytes
+
+    del_resp = await client.delete(
+        f"/api/v1/drivers/{driver_id}/documents/{document_id}",
+        headers=operador_headers,
+    )
+    assert del_resp.status_code == 204
+
+    list_after = await client.get(
+        f"/api/v1/drivers/{driver_id}/documents",
+        headers=operador_headers,
+    )
+    assert list_after.status_code == 200
+    assert list_after.json() == []
