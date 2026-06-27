@@ -23,11 +23,25 @@ fixed_expense_frequency = sa.Enum(
     "semestral",
     "anual",
     name="fixedexpensefrequency",
+    create_type=False,
 )
 
 
+def _ensure_fixed_expense_frequency_enum() -> None:
+    op.execute(
+        """
+        DO $$ BEGIN
+            CREATE TYPE fixedexpensefrequency AS ENUM
+                ('mensal', 'trimestral', 'semestral', 'anual');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+        """
+    )
+
+
 def upgrade() -> None:
-    fixed_expense_frequency.create(op.get_bind(), checkfirst=True)
+    _ensure_fixed_expense_frequency_enum()
 
     op.create_table(
         "tm_freight_stops",
