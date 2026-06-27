@@ -153,6 +153,9 @@ async def test_truck_implements_crud(
             "brand": "Randon",
             "model": "SR BAU",
             "capacity_kg": 30000,
+            "length_m": 14.6,
+            "width_m": 2.6,
+            "height_m": 2.8,
         },
         headers=operador_headers,
     )
@@ -161,6 +164,9 @@ async def test_truck_implements_crud(
     assert imp["name"] == "CARRETA LS"
     assert imp["type"] == "carreta"
     assert imp["plate"] == "XYZ9A87"
+    assert imp["length_m"] == 14.6
+    assert imp["width_m"] == 2.6
+    assert imp["height_m"] == 2.8
     implement_id = imp["id"]
 
     list_resp = await client.get(

@@ -73,6 +73,13 @@ class FinanceEntryStatus(StrEnum):
     VENCIDO = "vencido"
 
 
+class FixedExpenseFrequency(StrEnum):
+    MENSAL = "mensal"
+    TRIMESTRAL = "trimestral"
+    SEMESTRAL = "semestral"
+    ANUAL = "anual"
+
+
 class TrackingStatus(StrEnum):
     COLETADO = "coletado"
     EM_TRANSITO = "em_transito"

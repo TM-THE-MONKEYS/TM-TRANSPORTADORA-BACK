@@ -34,6 +34,50 @@ class AddressPoint(BaseModel):
         return data
 
 
+class FreightStopCreate(BaseModel):
+    ordem: int = Field(ge=1, le=20)
+    cep: str | None = None
+    logradouro: str | None = None
+    bairro: str | None = None
+    cidade: str
+    estado: str = Field(min_length=2, max_length=2)
+    observacoes: str | None = None
+    peso_kg: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_stop(cls, data: object) -> object:
+        if isinstance(data, dict):
+            apply_field_rules(data, ADDRESS_RULES)
+        return data
+
+
+class FreightStopRead(BaseModel):
+    id: uuid.UUID
+    sequence: int
+    city: str
+    state: str
+    street: str | None = None
+    neighborhood: str | None = None
+    cep: str | None = None
+    cargo_description: str | None = None
+    weight_kg: float | None = None
+
+    @classmethod
+    def from_orm(cls, stop: object) -> "FreightStopRead":
+        return cls(
+            id=stop.id,  # type: ignore[attr-defined]
+            sequence=stop.sequence,  # type: ignore[attr-defined]
+            city=stop.city,  # type: ignore[attr-defined]
+            state=stop.state,  # type: ignore[attr-defined]
+            street=stop.street,  # type: ignore[attr-defined]
+            neighborhood=stop.neighborhood,  # type: ignore[attr-defined]
+            cep=stop.cep,  # type: ignore[attr-defined]
+            cargo_description=stop.cargo_description,  # type: ignore[attr-defined]
+            weight_kg=stop.weight_kg,  # type: ignore[attr-defined]
+        )
+
+
 class FreightCostCreate(BaseModel):
     tipo: str = Field(max_length=100)
     valor: float = Field(gt=0)
@@ -79,6 +123,7 @@ class FreightCreate(BaseModel):
     distancia_km: float | None = Field(default=None, gt=0)
     observacoes: str | None = None
     costs: list[FreightCostCreate] = []
+    paradas: list[FreightStopCreate] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -96,7 +141,24 @@ class FreightCreate(BaseModel):
                 for cost in costs:
                     if isinstance(cost, dict):
                         apply_field_rules(cost, FREIGHT_COST_RULES)
+            paradas = normalized.get("paradas")
+            if isinstance(paradas, list):
+                for parada in paradas:
+                    if isinstance(parada, dict):
+                        apply_field_rules(parada, ADDRESS_RULES)
         return normalized
+
+    @model_validator(mode="after")
+    def validate_paradas(self) -> "FreightCreate":
+        if len(self.paradas) > 20:
+            raise ValueError("Máximo de 20 paradas intermediárias por frete")
+        ordens = [p.ordem for p in self.paradas]
+        if len(ordens) != len(set(ordens)):
+            raise ValueError("Ordem das paradas deve ser única por frete")
+        expected = list(range(1, len(self.paradas) + 1))
+        if sorted(ordens) != expected:
+            raise ValueError("Ordem das paradas deve ser sequencial de 1 a N")
+        return self
 
     @field_validator("valor_frete", "distancia_km", mode="before")
     @classmethod
@@ -176,8 +238,15 @@ class FreightFrontendRead(BaseModel):
     customer_name: str | None = None
     origin_city: str
     origin_state: str
+    origin_street: str | None = None
+    origin_neighborhood: str | None = None
+    origin_cep: str | None = None
     destination_city: str
     destination_state: str
+    destination_street: str | None = None
+    destination_neighborhood: str | None = None
+    destination_cep: str | None = None
+    stops: list[FreightStopRead] = []
     cargo_description: str
     weight_kg: float = 0.0
     value_brl: float
@@ -196,14 +265,23 @@ class FreightFrontendRead(BaseModel):
         destino = freight.destino or {}  # type: ignore[attr-defined]
         code = f"OF-{str(freight.id)[:8].upper()}"  # type: ignore[attr-defined]
         deadline = freight.data_entrega_prevista  # type: ignore[attr-defined]
+        stops_raw = getattr(freight, "stops", None) or []
+        stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
         return cls(
             id=freight.id,  # type: ignore[attr-defined]
             code=code,
             customer_id=freight.client_id,  # type: ignore[attr-defined]
             origin_city=origem.get("cidade", ""),
             origin_state=origem.get("estado", ""),
+            origin_street=origem.get("logradouro"),
+            origin_neighborhood=origem.get("bairro"),
+            origin_cep=origem.get("cep"),
             destination_city=destino.get("cidade", ""),
             destination_state=destino.get("estado", ""),
+            destination_street=destino.get("logradouro"),
+            destination_neighborhood=destino.get("bairro"),
+            destination_cep=destino.get("cep"),
+            stops=stops,
             cargo_description=freight.observacoes or "Carga não especificada",  # type: ignore[attr-defined]
             value_brl=freight.valor_frete,  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
@@ -224,6 +302,7 @@ class FreightFrontendListItem(BaseModel):
     origin_state: str
     destination_city: str
     destination_state: str
+    stops: list[FreightStopRead] = []
     value_brl: float
     status: FreightStatus
     truck_id: uuid.UUID | None = None
@@ -235,6 +314,8 @@ class FreightFrontendListItem(BaseModel):
     def from_orm(cls, freight: object) -> "FreightFrontendListItem":
         origem = freight.origem or {}  # type: ignore[attr-defined]
         destino = freight.destino or {}  # type: ignore[attr-defined]
+        stops_raw = getattr(freight, "stops", None) or []
+        stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
         return cls(
             id=freight.id,  # type: ignore[attr-defined]
             code=f"OF-{str(freight.id)[:8].upper()}",  # type: ignore[attr-defined]
@@ -243,6 +324,7 @@ class FreightFrontendListItem(BaseModel):
             origin_state=origem.get("estado", ""),
             destination_city=destino.get("cidade", ""),
             destination_state=destino.get("estado", ""),
+            stops=stops,
             value_brl=freight.valor_frete,  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
             truck_id=freight.truck_id,  # type: ignore[attr-defined]

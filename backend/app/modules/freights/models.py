@@ -48,6 +48,29 @@ class Freight(TenantMixin, SoftDeleteMixin, BaseModel):
     tracking_updates: Mapped[list["TrackingUpdate"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="freight", cascade="all, delete-orphan", lazy="noload"
     )
+    stops: Mapped[list["FreightStop"]] = relationship(
+        back_populates="freight",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class FreightStop(TenantMixin, BaseModel):
+    __tablename__ = "tm_freight_stops"
+
+    freight_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tm_freights.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    cep: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    street: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    neighborhood: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(2), nullable=False)
+    cargo_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    freight: Mapped["Freight"] = relationship(back_populates="stops")
 
 
 class FreightCost(TenantMixin, BaseModel):

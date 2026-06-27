@@ -555,6 +555,26 @@ interface TruckRead {
 
 ---
 
+### Implementos — `/trucks/{truck_id}/implements`
+
+**Body (POST/PATCH, inglês ou português):** inclui dimensões opcionais em metros:
+
+```json
+{
+  "name": "Carreta LS",
+  "type": "carreta",
+  "plate": "ABC1D23",
+  "capacity_kg": 30000,
+  "length_m": 14.6,
+  "width_m": 2.6,
+  "height_m": 2.8
+}
+```
+
+**Resposta GET:** inclui `length_m`, `width_m`, `height_m` (null se omitido).
+
+---
+
 ## Clients — `/api/v1/clients`
 
 Leitura: JWT. Escrita: **admin** ou **operador**.  
@@ -659,6 +679,7 @@ interface FreightListItem {
   origin_state: string;
   destination_city: string;
   destination_state: string;
+  stops: FreightStop[];
   value_brl: number;
   status: FreightStatus;
   truck_id: string | null;
@@ -694,6 +715,16 @@ interface FreightListItem {
   "data_entrega_prevista": "2026-06-03T18:00:00Z",
   "distancia_km": 410,
   "observacoes": "Carga frágil",
+  "paradas": [
+    {
+      "ordem": 1,
+      "logradouro": "Rod. Anhanguera, km 102",
+      "cidade": "Campinas",
+      "estado": "SP",
+      "observacoes": "Soja — lote 1",
+      "peso_kg": null
+    }
+  ],
   "costs": [
     { "tipo": "pedagio", "valor": 120.50, "descricao": "Rodovias" }
   ]
@@ -712,8 +743,15 @@ interface FreightRead {
   customer_name: string | null;
   origin_city: string;
   origin_state: string;
+  origin_street: string | null;
+  origin_neighborhood: string | null;
+  origin_cep: string | null;
   destination_city: string;
   destination_state: string;
+  destination_street: string | null;
+  destination_neighborhood: string | null;
+  destination_cep: string | null;
+  stops: FreightStop[];
   cargo_description: string;
   weight_kg: number;
   value_brl: number;
@@ -726,7 +764,21 @@ interface FreightRead {
   created_at: string;
   updated_at: string;
 }
+
+interface FreightStop {
+  id: string;
+  sequence: number;
+  city: string;
+  state: string;
+  street: string | null;
+  neighborhood: string | null;
+  cep: string | null;
+  cargo_description: string | null;
+  weight_kg: number | null;
+}
 ```
+
+> `paradas` no POST é opcional (máx. 20). Ordem sequencial 1..N. Ao marcar frete como `entregue`, o backend gera despesa **Comissão** (se motorista tiver `commission_pct` > 0).
 
 ---
 
@@ -883,6 +935,29 @@ interface CashFlow {
 ### DELETE `/finance/{entry_id}`
 
 **Resposta 204**
+
+---
+
+### Gastos fixos — `/finance/fixed-expenses`
+
+**Roles:** leitura admin/financeiro/operador; escrita admin/financeiro.
+
+| Método | Path | Descrição |
+|--------|------|-----------|
+| GET | `/fixed-expenses` | Lista gastos fixos |
+| POST | `/fixed-expenses` | Cria gasto fixo |
+| PATCH | `/fixed-expenses/{id}` | Atualiza |
+| POST | `/fixed-expenses/{id}/launch` | Lança despesa pendente e incrementa `parcelas_lancadas` |
+
+**Campos:** `total_parcelas` (null = ilimitado), `parcelas_lancadas`, `data_inicio`, `frequencia` (`mensal` \| `trimestral` \| `semestral` \| `anual`), `ativo`.
+
+Gasto expira quando `parcelas_lancadas >= total_parcelas` ou passaram `total_parcelas` meses desde `data_inicio`. Lançamento em gasto expirado/inativo retorna **422**.
+
+---
+
+### POST `/finance/sync-from-freights`
+
+Backfill de receitas de fretes, despesas de combustível/custos e **comissões** de fretes entregues (categoria `"Comissão"`, idempotente por frete).
 
 ---
 

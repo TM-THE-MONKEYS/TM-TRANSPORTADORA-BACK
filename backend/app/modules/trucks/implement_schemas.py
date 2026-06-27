@@ -28,6 +28,9 @@ class TruckImplementCreate(BaseModel):
     marca: str | None = Field(default=None, max_length=100)
     modelo: str | None = Field(default=None, max_length=100)
     capacidade_kg: float | None = Field(default=None, gt=0)
+    length_m: float | None = Field(default=None, gt=0)
+    width_m: float | None = Field(default=None, gt=0)
+    height_m: float | None = Field(default=None, gt=0)
     observacoes: str | None = None
 
     @model_validator(mode="before")
@@ -43,6 +46,9 @@ class TruckImplementCreate(BaseModel):
                 "marca",
                 "modelo",
                 "capacidade_kg",
+                "length_m",
+                "width_m",
+                "height_m",
                 "observacoes",
             ),
             field_rules=IMPLEMENT_CREATE_RULES,
@@ -55,9 +61,9 @@ class TruckImplementCreate(BaseModel):
             return None
         return normalize_plate(v)
 
-    @field_validator("capacidade_kg", mode="before")
+    @field_validator("capacidade_kg", "length_m", "width_m", "height_m", mode="before")
     @classmethod
-    def normalize_capacidade(cls, v: object) -> object:
+    def normalize_numeric_fields(cls, v: object) -> object:
         from app.shared.utils.data_normalization import parse_decimal_br
 
         return parse_decimal_br(v) if v is not None else v
@@ -77,6 +83,9 @@ class TruckImplementUpdate(BaseModel):
     marca: str | None = Field(default=None, max_length=100)
     modelo: str | None = Field(default=None, max_length=100)
     capacidade_kg: float | None = Field(default=None, gt=0)
+    length_m: float | None = Field(default=None, gt=0)
+    width_m: float | None = Field(default=None, gt=0)
+    height_m: float | None = Field(default=None, gt=0)
     observacoes: str | None = None
 
     @model_validator(mode="before")
@@ -95,9 +104,9 @@ class TruckImplementUpdate(BaseModel):
             return None
         return normalize_plate(v)
 
-    @field_validator("capacidade_kg", mode="before")
+    @field_validator("capacidade_kg", "length_m", "width_m", "height_m", mode="before")
     @classmethod
-    def normalize_capacidade(cls, v: object) -> object:
+    def normalize_numeric_fields(cls, v: object) -> object:
         from app.shared.utils.data_normalization import parse_decimal_br
 
         return parse_decimal_br(v) if v is not None else v
@@ -131,6 +140,9 @@ class TruckImplementFrontendRead(BaseModel):
     brand: str | None = None
     model: str | None = None
     capacity_kg: float | None = None
+    length_m: float | None = None
+    width_m: float | None = None
+    height_m: float | None = None
     created_at: str
 
     @classmethod
@@ -145,5 +157,8 @@ class TruckImplementFrontendRead(BaseModel):
             brand=implement.marca,  # type: ignore[attr-defined]
             model=implement.modelo,  # type: ignore[attr-defined]
             capacity_kg=implement.capacidade_kg,  # type: ignore[attr-defined]
+            length_m=implement.length_m,  # type: ignore[attr-defined]
+            width_m=implement.width_m,  # type: ignore[attr-defined]
+            height_m=implement.height_m,  # type: ignore[attr-defined]
             created_at=implement.created_at.isoformat(),  # type: ignore[attr-defined]
         )

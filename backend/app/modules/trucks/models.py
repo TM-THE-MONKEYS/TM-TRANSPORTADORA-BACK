@@ -48,4 +48,7 @@ class TruckImplement(TenantMixin, SoftDeleteMixin, BaseModel):
     marca: Mapped[str | None] = mapped_column(String(100), nullable=True)
     modelo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     capacidade_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    width_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    height_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)

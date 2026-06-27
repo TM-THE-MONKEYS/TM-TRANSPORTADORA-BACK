@@ -7,18 +7,20 @@ from datetime import date, datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.drivers.models import Driver
 from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
 from app.modules.freights.models import Freight, FreightCost
 from app.modules.fuel.models import FuelRefill
 from app.modules.tolls.models import TollCharge
 from app.modules.notifications.service import freight_code
-from app.shared.enums import FinanceEntryStatus, FinanceEntryType
+from app.shared.enums import FinanceEntryStatus, FinanceEntryType, FreightStatus
 
 SOURCE_REVENUE = "freight_revenue:"
 SOURCE_FUEL = "fuel_refill:"
 SOURCE_TOLL = "toll_charge:"
 SOURCE_COST = "freight_cost:"
+COMMISSION_CATEGORY = "Comissão"
 
 
 async def _find_by_source(session: AsyncSession, source_key: str) -> FinanceEntry | None:
@@ -179,6 +181,63 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
     return await FinanceRepository(session, cost.tenant_id).create(entry)
 
 
+async def find_commission_expense(
+    session: AsyncSession,
+    freight_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> FinanceEntry | None:
+    result = await session.execute(
+        select(FinanceEntry).where(
+            FinanceEntry.freight_id == freight_id,
+            FinanceEntry.tenant_id == tenant_id,
+            FinanceEntry.tipo == FinanceEntryType.DESPESA,
+            FinanceEntry.categoria == COMMISSION_CATEGORY,
+            FinanceEntry.deleted_at.is_(None),
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_commission_expense(session: AsyncSession, freight: Freight) -> FinanceEntry | None:
+    """Despesa de comissão do motorista ao entregar frete (idempotente)."""
+    if freight.status != FreightStatus.ENTREGUE:
+        return None
+    if not freight.driver_id:
+        return None
+    if float(freight.valor_frete or 0) <= 0:
+        return None
+
+    existing = await find_commission_expense(session, freight.id, freight.tenant_id)
+    if existing:
+        return existing
+
+    driver = await session.get(Driver, freight.driver_id)
+    if not driver or driver.commission_pct is None or float(driver.commission_pct) <= 0:
+        return None
+
+    valor = round(float(freight.valor_frete) * float(driver.commission_pct) / 100, 2)
+    if valor <= 0:
+        return None
+
+    code = freight_code(freight.id)
+    vencimento: date | None = None
+    if freight.data_entrega_prevista:
+        dt = freight.data_entrega_prevista
+        vencimento = dt.date() if isinstance(dt, datetime) else dt
+
+    entry = FinanceEntry(
+        tipo=FinanceEntryType.DESPESA,
+        categoria=COMMISSION_CATEGORY,
+        descricao=f"Comissão {driver.nome} · frete {code}",
+        valor=valor,
+        freight_id=freight.id,
+        data_vencimento=vencimento,
+        status=FinanceEntryStatus.PENDENTE,
+        tenant_id=freight.tenant_id,
+    )
+    return await FinanceRepository(session, freight.tenant_id).create(entry)
+
+
 async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) -> dict[str, int]:
     """Backfill: receitas de fretes + despesas de abastecimentos e custos."""
     stats = {"receitas": 0, "despesas": 0}
@@ -191,6 +250,9 @@ async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) ->
     for freight in freights:
         if await ensure_freight_revenue(session, freight):
             stats["receitas"] += 1
+        if freight.status == FreightStatus.ENTREGUE:
+            if await create_commission_expense(session, freight):
+                stats["despesas"] += 1
 
     refills = (
         await session.execute(

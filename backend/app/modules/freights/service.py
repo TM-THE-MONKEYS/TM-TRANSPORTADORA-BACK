@@ -6,9 +6,9 @@ import uuid
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.freights.models import Freight, FreightCost
+from app.modules.freights.models import Freight, FreightCost, FreightStop
 from app.modules.freights.repository import FreightRepository
-from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightUpdate
+from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightStopCreate, FreightUpdate
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
@@ -50,19 +50,40 @@ class FreightService:
 
     async def create(self, data: FreightCreate, created_by: User) -> Freight:
         self._check_write_access(created_by)
-        freight_data = data.model_dump(exclude={"costs"})
+        freight_data = data.model_dump(exclude={"costs", "paradas"})
         freight_data["origem"] = data.origem.model_dump()
         freight_data["destino"] = data.destino.model_dump()
         freight = Freight(**freight_data)
         freight = await self._repo.create(freight)
+        if data.paradas:
+            stops = [self._stop_from_payload(p) for p in data.paradas]
+            saved_stops = await self._repo.add_stops(freight.id, stops)
+            freight.stops = saved_stops
         for cost_data in data.costs:
             await self._repo.add_cost(freight.id, cost_data.tipo, cost_data.valor, cost_data.descricao)
         from app.modules.finance.freight_sync import ensure_freight_revenue
 
         await ensure_freight_revenue(self._session, freight)
+        freight_id = freight.id
         await self._session.commit()
+        self._session.expire(freight)
+        freight = await self._repo.get_by_id(freight_id, with_relations=True)
+        assert freight is not None
         log.info("freight_created", freight_id=str(freight.id), client_id=str(data.client_id))
         return freight
+
+    @staticmethod
+    def _stop_from_payload(parada: FreightStopCreate) -> FreightStop:
+        return FreightStop(
+            sequence=parada.ordem,
+            cep=parada.cep,
+            street=parada.logradouro,
+            neighborhood=parada.bairro,
+            city=parada.cidade,
+            state=parada.estado.upper(),
+            cargo_description=parada.observacoes,
+            weight_kg=parada.peso_kg,
+        )
 
     async def get_by_id(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         freight = await self._repo.get_by_id(freight_id, with_relations=True)
@@ -100,7 +121,12 @@ class FreightService:
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(freight, field, value)
         freight = await self._repo.update(freight)
+        if data.status:
+            await self._on_status_changed(freight, data.status)
         await self._session.commit()
+        if data.status or data.model_dump(exclude_none=True):
+            freight = await self._repo.get_by_id(freight_id, with_relations=True)
+            assert freight is not None
         return freight
 
     async def delete(self, freight_id: uuid.UUID, deleted_by: User) -> None:
@@ -127,7 +153,10 @@ class FreightService:
         next_status = _STATUS_FLOW[idx + 1]
         freight.status = next_status
         freight = await self._repo.update(freight)
+        await self._on_status_changed(freight, next_status)
         await self._session.commit()
+        freight = await self._repo.get_by_id(freight_id, with_relations=True)
+        assert freight is not None
         log.info("freight_status_advanced", freight_id=str(freight_id), new_status=next_status.value)
         return freight
 
@@ -145,9 +174,19 @@ class FreightService:
             )
         freight.status = new_status
         freight = await self._repo.update(freight)
+        await self._on_status_changed(freight, new_status)
         await self._session.commit()
+        freight = await self._repo.get_by_id(freight_id, with_relations=True)
+        assert freight is not None
         log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
         return freight
+
+    async def _on_status_changed(self, freight: Freight, new_status: FreightStatus) -> None:
+        if new_status != FreightStatus.ENTREGUE:
+            return
+        from app.modules.finance.freight_sync import create_commission_expense
+
+        await create_commission_expense(self._session, freight)
 
     async def list_costs(
         self, freight_id: uuid.UUID, requesting_user: User

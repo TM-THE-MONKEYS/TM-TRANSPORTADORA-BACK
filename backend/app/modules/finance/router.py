@@ -18,6 +18,8 @@ from app.modules.finance.schemas import (
     FinanceEntryRead,
     FinanceEntryUpdate,
 )
+from app.modules.finance.fixed_expense_schemas import FixedExpenseCreate, FixedExpenseRead, FixedExpenseUpdate
+from app.modules.finance.fixed_expense_service import FixedExpenseService
 from app.modules.finance.service import FinanceService
 from app.modules.users.models import User
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType
@@ -43,6 +45,47 @@ async def get_cash_flow(
 ) -> CashFlowResponse:
     service = FinanceService(db, current_user.tenant_id)
     return await service.get_cash_flow(current_user)
+
+
+@router.get("/fixed-expenses", response_model=list[FixedExpenseRead])
+async def list_fixed_expenses(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> list[FixedExpenseRead]:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    return await service.list(current_user)  # type: ignore[return-value]
+
+
+@router.post("/fixed-expenses", response_model=FixedExpenseRead, status_code=status.HTTP_201_CREATED)
+async def create_fixed_expense(
+    payload: FixedExpenseCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FixedExpenseRead:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    return await service.create(payload, current_user)  # type: ignore[return-value]
+
+
+@router.patch("/fixed-expenses/{expense_id}", response_model=FixedExpenseRead)
+async def update_fixed_expense(
+    expense_id: uuid.UUID,
+    payload: FixedExpenseUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FixedExpenseRead:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    return await service.update(expense_id, payload, current_user)  # type: ignore[return-value]
+
+
+@router.post("/fixed-expenses/{expense_id}/launch", response_model=FinanceEntryRead)
+async def launch_fixed_expense(
+    expense_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FinanceEntryRead:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    entry = await service.launch(expense_id, current_user)
+    return FinanceEntryRead.model_validate(entry)
 
 
 @router.get("", response_model=PagedResponse[FinanceEntryListResponse])

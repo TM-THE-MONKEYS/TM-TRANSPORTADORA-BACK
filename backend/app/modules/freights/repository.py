@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.modules.freights.models import Freight, FreightAttachment, FreightCost
+from app.modules.freights.models import Freight, FreightAttachment, FreightCost, FreightStop
 from app.shared.base_repository import TenantBaseRepository
 from app.shared.enums import FreightStatus
 from app.shared.pagination import PageParams
@@ -28,6 +28,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
             query = query.options(
                 selectinload(Freight.costs),
                 selectinload(Freight.attachments),
+                selectinload(Freight.stops),
             )
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
@@ -51,7 +52,10 @@ class FreightRepository(TenantBaseRepository[Freight]):
             query = query.where(Freight.truck_id == truck_id)
         total = await self._count(query)
         result = await self._session.execute(
-            query.order_by(Freight.created_at.desc()).offset(params.offset).limit(params.limit)
+            query.options(selectinload(Freight.stops))
+            .order_by(Freight.created_at.desc())
+            .offset(params.offset)
+            .limit(params.limit)
         )
         return list(result.scalars().all()), total
 
@@ -65,6 +69,14 @@ class FreightRepository(TenantBaseRepository[Freight]):
             .order_by(FreightCost.created_at.desc())
         )
         return list(result.scalars().all())
+
+    async def add_stops(self, freight_id: uuid.UUID, stops: list[FreightStop]) -> list[FreightStop]:
+        for stop in stops:
+            stop.freight_id = freight_id
+            stop.tenant_id = self._tenant_id
+            self._session.add(stop)
+        await self._session.flush()
+        return stops
 
     async def add_cost(self, freight_id: uuid.UUID, tipo: str, valor: float, descricao: str | None = None) -> FreightCost:
         cost = FreightCost(freight_id=freight_id, tipo=tipo, valor=valor, descricao=descricao, tenant_id=self._tenant_id)
