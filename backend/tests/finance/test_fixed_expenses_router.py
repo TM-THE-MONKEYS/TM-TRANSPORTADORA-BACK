@@ -102,3 +102,34 @@ async def test_fixed_expense_expired_by_months_on_list(
     await db_session.refresh(expense)
     assert refresh_expiry(expense) is True
     assert expense.ativo is False
+
+
+@pytest.mark.asyncio
+async def test_delete_fixed_expense_soft_removes_from_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: object,
+) -> None:
+    headers = await _financeiro_headers(db_session, test_tenant)
+
+    create_resp = await client.post(
+        "/api/v1/finance/fixed-expenses",
+        json={
+            "nome": "Gasto temporário",
+            "categoria": "Outros",
+            "valor": 100.0,
+            "frequencia": "mensal",
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    expense_id = create_resp.json()["id"]
+
+    delete_resp = await client.delete(
+        f"/api/v1/finance/fixed-expenses/{expense_id}",
+        headers=headers,
+    )
+    assert delete_resp.status_code == 204
+
+    list_resp = await client.get("/api/v1/finance/fixed-expenses", headers=headers)
+    assert all(item["id"] != expense_id for item in list_resp.json())

@@ -114,3 +114,10 @@ class FixedExpenseService:
             parcelas=expense.parcelas_lancadas,
         )
         return entry
+
+    async def delete(self, expense_id: uuid.UUID, deleted_by: User) -> None:
+        self._check_write(deleted_by)
+        expense = await self._refresh_and_get(expense_id)
+        await self._repo.soft_delete(expense)
+        await self._session.commit()
+        log.info("fixed_expense_deleted", expense_id=str(expense.id))

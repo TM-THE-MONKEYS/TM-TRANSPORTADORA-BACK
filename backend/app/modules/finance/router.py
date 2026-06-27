@@ -77,6 +77,21 @@ async def update_fixed_expense(
     return await service.update(expense_id, payload, current_user)  # type: ignore[return-value]
 
 
+@router.delete(
+    "/fixed-expenses/{expense_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_fixed_expense(
+    expense_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Response:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    await service.delete(expense_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/fixed-expenses/{expense_id}/launch", response_model=FinanceEntryRead)
 async def launch_fixed_expense(
     expense_id: uuid.UUID,
