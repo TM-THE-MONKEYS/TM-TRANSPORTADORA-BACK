@@ -85,6 +85,39 @@ def mark_overdue_payments(self) -> dict[str, int]:  # type: ignore[no-untyped-de
         raise self.retry(exc=exc, countdown=3600)
 
 
+@celery_app.task(name="app.workers.tasks.deactivate_expired_fixed_expenses", bind=True, max_retries=3)
+def deactivate_expired_fixed_expenses(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    """Desativa gastos fixos expirados por data ou parcelas (todos os tenants)."""
+    async def _run() -> dict[str, int]:
+        from sqlalchemy import select
+
+        from app.core.database.session import AsyncSessionLocal
+        from app.modules.finance.fixed_expense_utils import refresh_expiry
+        from app.modules.finance.models import FixedExpense
+
+        deactivated = 0
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(FixedExpense).where(
+                    FixedExpense.deleted_at.is_(None),
+                    FixedExpense.ativo.is_(True),
+                    FixedExpense.total_parcelas.isnot(None),
+                )
+            )
+            for expense in result.scalars().all():
+                if refresh_expiry(expense):
+                    deactivated += 1
+            await session.commit()
+        log.info("fixed_expenses_deactivated", count=deactivated)
+        return {"deactivated_count": deactivated}
+
+    try:
+        return _run_async(_run())
+    except Exception as exc:
+        log.exception("deactivate_expired_fixed_expenses_failed", exc=str(exc))
+        raise self.retry(exc=exc, countdown=3600)
+
+
 @celery_app.task(name="app.workers.tasks.cleanup_expired_tokens", bind=True, max_retries=3)
 def cleanup_expired_tokens(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
     """Remove expired refresh tokens from database (across all tenants)."""

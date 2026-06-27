@@ -32,6 +32,10 @@ celery_app.conf.update(
             "task": "app.workers.tasks.mark_overdue_payments",
             "schedule": 86400.0,  # every day
         },
+        "deactivate-expired-fixed-expenses": {
+            "task": "app.workers.tasks.deactivate_expired_fixed_expenses",
+            "schedule": 86400.0,  # every day
+        },
         "cleanup-expired-tokens": {
             "task": "app.workers.tasks.cleanup_expired_tokens",
             "schedule": 3600.0,  # every hour
