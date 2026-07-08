@@ -29,6 +29,17 @@ _ALLOWED_TRANSITIONS: dict[FreightStatus, list[FreightStatus]] = {
     FreightStatus.CANCELADO: [],
 }
 
+
+def _is_valid_status_transition(current: FreightStatus, target: FreightStatus) -> bool:
+    """Allow forward/backward moves in the flow; cancelado ↔ orcamento for reopen."""
+    if current == target:
+        return True
+    if target == FreightStatus.CANCELADO:
+        return current != FreightStatus.CANCELADO
+    if current == FreightStatus.CANCELADO:
+        return target == FreightStatus.ORCAMENTO
+    return current in _STATUS_FLOW and target in _STATUS_FLOW
+
 _STATUS_FLOW: list[FreightStatus] = [
     FreightStatus.ORCAMENTO,
     FreightStatus.CONFIRMADO,
@@ -113,16 +124,16 @@ class FreightService:
         if not freight:
             raise NotFoundException("Frete não encontrado")
         if data.status and data.status != freight.status:
-            allowed = _ALLOWED_TRANSITIONS.get(freight.status, [])
-            if data.status not in allowed:
+            if not _is_valid_status_transition(freight.status, data.status):
                 raise ForbiddenException(
                     f"Transição inválida: {freight.status.value} → {data.status.value}"
                 )
+        old_status = freight.status
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(freight, field, value)
         freight = await self._repo.update(freight)
-        if data.status:
-            await self._on_status_changed(freight, data.status)
+        if data.status and data.status != old_status:
+            await self._on_status_changed(freight, old_status, data.status)
         await self._session.commit()
         if data.status or data.model_dump(exclude_none=True):
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
@@ -134,8 +145,14 @@ class FreightService:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
-        if freight.status not in (FreightStatus.ORCAMENTO, FreightStatus.CANCELADO):
-            raise ForbiddenException("Apenas fretes em orçamento ou cancelados podem ser removidos")
+        if deleted_by.role != UserRole.ADMIN and freight.status not in (
+            FreightStatus.ORCAMENTO,
+            FreightStatus.CANCELADO,
+        ):
+            raise ForbiddenException(
+                "Apenas fretes em orçamento ou cancelados podem ser removidos. "
+                "Administradores podem excluir fretes em qualquer status."
+            )
         await self._repo.soft_delete(freight)
         await self._session.commit()
 
@@ -151,9 +168,10 @@ class FreightService:
         if idx >= len(_STATUS_FLOW) - 1:
             raise ForbiddenException("Frete já está no status final")
         next_status = _STATUS_FLOW[idx + 1]
+        old_status = freight.status
         freight.status = next_status
         freight = await self._repo.update(freight)
-        await self._on_status_changed(freight, next_status)
+        await self._on_status_changed(freight, old_status, next_status)
         await self._session.commit()
         freight = await self._repo.get_by_id(freight_id, with_relations=True)
         assert freight is not None
@@ -167,26 +185,38 @@ class FreightService:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
-        allowed = _ALLOWED_TRANSITIONS.get(freight.status, [])
-        if new_status != freight.status and new_status not in allowed:
+        if new_status != freight.status and not _is_valid_status_transition(
+            freight.status, new_status
+        ):
             raise ForbiddenException(
                 f"Transição inválida: {freight.status.value} → {new_status.value}"
             )
+        old_status = freight.status
         freight.status = new_status
         freight = await self._repo.update(freight)
-        await self._on_status_changed(freight, new_status)
+        if new_status != old_status:
+            await self._on_status_changed(freight, old_status, new_status)
         await self._session.commit()
         freight = await self._repo.get_by_id(freight_id, with_relations=True)
         assert freight is not None
         log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
         return freight
 
-    async def _on_status_changed(self, freight: Freight, new_status: FreightStatus) -> None:
-        if new_status != FreightStatus.ENTREGUE:
-            return
-        from app.modules.finance.freight_sync import create_commission_expense
+    async def _on_status_changed(
+        self,
+        freight: Freight,
+        old_status: FreightStatus,
+        new_status: FreightStatus,
+    ) -> None:
+        from app.modules.finance.freight_sync import (
+            cancel_commission_expense,
+            create_commission_expense,
+        )
 
-        await create_commission_expense(self._session, freight)
+        if old_status == FreightStatus.ENTREGUE and new_status != FreightStatus.ENTREGUE:
+            await cancel_commission_expense(self._session, freight)
+        if new_status == FreightStatus.ENTREGUE:
+            await create_commission_expense(self._session, freight)
 
     async def list_costs(
         self, freight_id: uuid.UUID, requesting_user: User

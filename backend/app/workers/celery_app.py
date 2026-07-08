@@ -36,6 +36,10 @@ celery_app.conf.update(
             "task": "app.workers.tasks.deactivate_expired_fixed_expenses",
             "schedule": 86400.0,  # every day
         },
+        "launch-monthly-fixed-expenses": {
+            "task": "app.workers.tasks.launch_monthly_fixed_expenses",
+            "schedule": 86400.0,  # every day — idempotent per month
+        },
         "cleanup-expired-tokens": {
             "task": "app.workers.tasks.cleanup_expired_tokens",
             "schedule": 3600.0,  # every hour

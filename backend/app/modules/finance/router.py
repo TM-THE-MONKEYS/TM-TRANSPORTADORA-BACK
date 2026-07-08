@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
+from app.modules.finance.competencia_schemas import (
+    CompetenciaReportResponse,
+    FixedExpenseLaunchStatusItem,
+    LaunchPendingResponse,
+)
 from app.modules.finance.schemas import (
     CashFlowResponse,
     FinanceEntryCreate,
@@ -18,7 +23,12 @@ from app.modules.finance.schemas import (
     FinanceEntryRead,
     FinanceEntryUpdate,
 )
-from app.modules.finance.fixed_expense_schemas import FixedExpenseCreate, FixedExpenseRead, FixedExpenseUpdate
+from app.modules.finance.fixed_expense_schemas import (
+    FixedExpenseCreate,
+    FixedExpenseLaunch,
+    FixedExpenseRead,
+    FixedExpenseUpdate,
+)
 from app.modules.finance.fixed_expense_service import FixedExpenseService
 from app.modules.finance.service import FinanceService
 from app.modules.users.models import User
@@ -42,9 +52,22 @@ async def sync_finance_from_freights(
 async def get_cash_flow(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> CashFlowResponse:
     service = FinanceService(db, current_user.tenant_id)
-    return await service.get_cash_flow(current_user)
+    return await service.get_cash_flow(current_user, competencia_mes, competencia_ano)
+
+
+@router.get("/competencia-report", response_model=CompetenciaReportResponse)
+async def get_competencia_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int = Query(ge=1, le=12),
+    competencia_ano: int = Query(ge=2000, le=2100),
+) -> CompetenciaReportResponse:
+    service = FinanceService(db, current_user.tenant_id)
+    return await service.get_competencia_report(current_user, competencia_mes, competencia_ano)
 
 
 @router.get("/fixed-expenses", response_model=list[FixedExpenseRead])
@@ -54,6 +77,28 @@ async def list_fixed_expenses(
 ) -> list[FixedExpenseRead]:
     service = FixedExpenseService(db, current_user.tenant_id)
     return await service.list(current_user)  # type: ignore[return-value]
+
+
+@router.get("/fixed-expenses/launch-status", response_model=list[FixedExpenseLaunchStatusItem])
+async def fixed_expenses_launch_status(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int = Query(ge=1, le=12),
+    competencia_ano: int = Query(ge=2000, le=2100),
+) -> list[FixedExpenseLaunchStatusItem]:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    return await service.launch_status(current_user, competencia_mes, competencia_ano)
+
+
+@router.post("/fixed-expenses/launch-pending", response_model=LaunchPendingResponse)
+async def launch_pending_fixed_expenses(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int = Query(ge=1, le=12),
+    competencia_ano: int = Query(ge=2000, le=2100),
+) -> LaunchPendingResponse:
+    service = FixedExpenseService(db, current_user.tenant_id)
+    return await service.launch_pending(current_user, competencia_mes, competencia_ano)
 
 
 @router.post("/fixed-expenses", response_model=FixedExpenseRead, status_code=status.HTTP_201_CREATED)
@@ -82,9 +127,11 @@ async def launch_fixed_expense(
     expense_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    payload: FixedExpenseLaunch | None = None,
 ) -> FinanceEntryRead:
     service = FixedExpenseService(db, current_user.tenant_id)
-    entry = await service.launch(expense_id, current_user)
+    vencimento = payload.data_vencimento if payload else None
+    entry = await service.launch(expense_id, current_user, vencimento=vencimento)
     return FinanceEntryRead.model_validate(entry)
 
 
@@ -100,11 +147,22 @@ async def list_finance_entries(
     freight_id: uuid.UUID | None = Query(default=None),
     vencimento_from: date | None = Query(default=None),
     vencimento_to: date | None = Query(default=None),
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[FinanceEntryListResponse]:
     service = FinanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(  # type: ignore[return-value]
-        params, current_user, tipo, status, categoria, freight_id, vencimento_from, vencimento_to
+        params,
+        current_user,
+        tipo,
+        status,
+        categoria,
+        freight_id,
+        vencimento_from,
+        vencimento_to,
+        competencia_mes,
+        competencia_ano,
     )
 
 

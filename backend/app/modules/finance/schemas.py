@@ -12,6 +12,7 @@ from app.shared.utils.data_normalization import (
     FINANCE_UPDATE_RULES,
     parse_decimal_br,
 )
+from app.shared.utils.dates import normalize_date_only_value
 from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
 
 
@@ -41,6 +42,11 @@ class FinanceEntryCreate(BaseModel):
     def normalize_valor(cls, v: object) -> object:
         return parse_decimal_br(v) if v is not None else v
 
+    @field_validator("data_vencimento", "data_pagamento", mode="before")
+    @classmethod
+    def normalize_dates(cls, v: object) -> object:
+        return normalize_date_only_value(v)
+
 
 class FinanceEntryUpdate(BaseModel):
     categoria: str | None = Field(default=None, min_length=1, max_length=100)
@@ -60,6 +66,11 @@ class FinanceEntryUpdate(BaseModel):
     @classmethod
     def normalize_valor(cls, v: object) -> object:
         return parse_decimal_br(v) if v is not None else v
+
+    @field_validator("data_vencimento", "data_pagamento", mode="before")
+    @classmethod
+    def normalize_dates(cls, v: object) -> object:
+        return normalize_date_only_value(v)
 
 
 class FinanceEntryRead(BaseModel):
@@ -90,6 +101,7 @@ class FinanceEntryListResponse(BaseModel):
     freight_id: uuid.UUID | None = None
     status: FinanceEntryStatus
     data_vencimento: date | None
+    observacoes: str | None = None
     created_at: datetime
 
 

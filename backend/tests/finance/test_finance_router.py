@@ -13,35 +13,35 @@ from app.modules.users.models import User
 from app.shared.enums import UserRole
 
 
-async def _make_financeiro_user(db_session: AsyncSession) -> tuple[User, str]:
+async def _financeiro_headers(db_session: AsyncSession, test_tenant: object) -> dict[str, str]:
     user = User(
         nome="Financeiro Test",
         email=f"financeiro_{uuid.uuid4().hex[:6]}@test.com",
         hashed_password=hash_password("Fin@123!"),
         role=UserRole.FINANCEIRO,
         is_active=True,
+        tenant_id=test_tenant.id,  # type: ignore[attr-defined]
     )
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
-    token = create_access_token(user.id, user.role)
-    return user, token
+    token = create_access_token(user.id, user.role, tenant_id=user.tenant_id)
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio
 async def test_finance_requires_financeiro_or_admin(
-    client: AsyncClient, operador_headers: dict[str, str], operador_user: object
+    client: AsyncClient, motorista_headers: dict[str, str]
 ) -> None:
-    response = await client.get("/api/v1/finance", headers=operador_headers)
+    response = await client.get("/api/v1/finance", headers=motorista_headers)
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_create_finance_entry(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, test_tenant: object
 ) -> None:
-    _, token = await _make_financeiro_user(db_session)
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = await _financeiro_headers(db_session, test_tenant)
 
     response = await client.post(
         "/api/v1/finance",
@@ -60,9 +60,10 @@ async def test_create_finance_entry(
 
 
 @pytest.mark.asyncio
-async def test_cash_flow(client: AsyncClient, db_session: AsyncSession) -> None:
-    _, token = await _make_financeiro_user(db_session)
-    headers = {"Authorization": f"Bearer {token}"}
+async def test_cash_flow(
+    client: AsyncClient, db_session: AsyncSession, test_tenant: object
+) -> None:
+    headers = await _financeiro_headers(db_session, test_tenant)
 
     response = await client.get("/api/v1/finance/cash-flow", headers=headers)
     assert response.status_code == 200

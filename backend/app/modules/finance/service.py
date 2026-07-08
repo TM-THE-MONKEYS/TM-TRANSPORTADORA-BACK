@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
+from app.modules.finance.competencia_schemas import CompetenciaReportResponse
 from app.modules.finance.schemas import (
     CashFlowResponse,
     FinanceEntryCreate,
@@ -64,10 +65,20 @@ class FinanceService:
         freight_id: uuid.UUID | None = None,
         vencimento_from: date | None = None,
         vencimento_to: date | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> PagedResponse[FinanceEntry]:
         self._check_read_access(requesting_user)
         items, total = await self._repo.list(
-            params, tipo, status, categoria, freight_id, vencimento_from, vencimento_to
+            params,
+            tipo,
+            status,
+            categoria,
+            freight_id,
+            vencimento_from,
+            vencimento_to,
+            competencia_mes,
+            competencia_ano,
         )
         return PagedResponse.create(items, total, params)
 
@@ -90,10 +101,46 @@ class FinanceService:
         await self._repo.soft_delete(entry)
         await self._session.commit()
 
-    async def get_cash_flow(self, requesting_user: User) -> CashFlowResponse:
+    async def get_cash_flow(
+        self,
+        requesting_user: User,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> CashFlowResponse:
         self._check_read_access(requesting_user)
-        summary = await self._repo.get_cash_flow_summary()
+        summary = await self._repo.get_cash_flow_summary(competencia_mes, competencia_ano)
         return CashFlowResponse(**summary)
+
+    async def get_competencia_report(
+        self,
+        requesting_user: User,
+        competencia_mes: int,
+        competencia_ano: int,
+    ) -> CompetenciaReportResponse:
+        self._check_read_access(requesting_user)
+        summary = await self._repo.get_cash_flow_summary(competencia_mes, competencia_ano)
+        daily, by_category = await self._repo.get_competencia_aggregates(
+            competencia_mes, competencia_ano
+        )
+        daily_series = [
+            {
+                "date": d,
+                "receitas": vals["receitas"],
+                "despesas": vals["despesas"],
+            }
+            for d, vals in sorted(daily.items())
+        ]
+        expenses_by_category = [
+            {"categoria": cat, "valor": val}
+            for cat, val in sorted(by_category.items(), key=lambda x: -x[1])
+        ]
+        return CompetenciaReportResponse(
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            cash_flow=CashFlowResponse(**summary),
+            daily_series=daily_series,  # type: ignore[arg-type]
+            expenses_by_category=expenses_by_category,  # type: ignore[arg-type]
+        )
 
     async def sync_from_freights(self, requesting_user: User) -> dict[str, int]:
         """Importa receitas de fretes e despesas (abastecimentos/custos) para o financeiro."""

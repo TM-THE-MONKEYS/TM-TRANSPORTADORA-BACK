@@ -8,6 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.shared.enums import FixedExpenseFrequency
 from app.shared.utils.data_normalization import parse_decimal_br
+from app.shared.utils.dates import normalize_date_only_value
+
+
+class FixedExpenseLaunch(BaseModel):
+    data_vencimento: date | None = None
+
+    @field_validator("data_vencimento", mode="before")
+    @classmethod
+    def normalize_vencimento(cls, v: object) -> object:
+        return normalize_date_only_value(v)
 
 
 class FixedExpenseCreate(BaseModel):
@@ -30,9 +40,7 @@ class FixedExpenseCreate(BaseModel):
     @field_validator("data_inicio", mode="before")
     @classmethod
     def normalize_data_inicio(cls, v: object) -> object:
-        if isinstance(v, str) and "T" in v:
-            return v.split("T")[0]
-        return v
+        return normalize_date_only_value(v)
 
 
 class FixedExpenseUpdate(BaseModel):
@@ -55,9 +63,7 @@ class FixedExpenseUpdate(BaseModel):
     @field_validator("data_inicio", mode="before")
     @classmethod
     def normalize_data_inicio(cls, v: object) -> object:
-        if isinstance(v, str) and "T" in v:
-            return v.split("T")[0]
-        return v
+        return normalize_date_only_value(v)
 
 
 class FixedExpenseRead(BaseModel):

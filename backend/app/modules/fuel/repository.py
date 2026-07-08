@@ -24,7 +24,12 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
         driver_id: uuid.UUID | None = None,
         limit: int,
         offset: int,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> tuple[list[FuelRefill], int]:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
         base = (
             select(FuelRefill)
             .join(Freight, FuelRefill.freight_id == Freight.id)
@@ -32,6 +37,19 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
         )
         if driver_id is not None:
             base = base.where(FuelRefill.driver_id == driver_id)
+        if competencia_mes and competencia_ano:
+            tz = ZoneInfo("America/Sao_Paulo")
+            start = datetime(competencia_ano, competencia_mes, 1, tzinfo=tz)
+            if competencia_mes == 12:
+                end = datetime(competencia_ano + 1, 1, 1, tzinfo=tz)
+            else:
+                end = datetime(competencia_ano, competencia_mes + 1, 1, tzinfo=tz)
+            start_utc = start.astimezone(timezone.utc)
+            end_utc = end.astimezone(timezone.utc)
+            base = base.where(
+                FuelRefill.data_abastecimento >= start_utc,
+                FuelRefill.data_abastecimento < end_utc,
+            )
 
         count_q = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_q)).scalar_one()

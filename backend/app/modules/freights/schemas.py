@@ -15,6 +15,7 @@ from app.shared.utils.data_normalization import (
     apply_field_rules,
     parse_decimal_br,
 )
+from app.shared.utils.dates import deadline_input_to_utc, format_date_only_iso
 from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
 
 
@@ -160,6 +161,11 @@ class FreightCreate(BaseModel):
             raise ValueError("Ordem das paradas deve ser sequencial de 1 a N")
         return self
 
+    @field_validator("data_coleta", "data_entrega_prevista", mode="before")
+    @classmethod
+    def normalize_date_fields_create(cls, v: object) -> object:
+        return deadline_input_to_utc(v)
+
     @field_validator("valor_frete", "distancia_km", mode="before")
     @classmethod
     def normalize_decimal_fields(cls, v: object) -> object:
@@ -181,6 +187,11 @@ class FreightUpdate(BaseModel):
     @classmethod
     def normalize_payload(cls, data: object) -> object:
         return normalize_update_payload(data, {}, field_rules=FREIGHT_UPDATE_RULES)
+
+    @field_validator("data_coleta", "data_entrega_prevista", "data_entrega_real", mode="before")
+    @classmethod
+    def normalize_date_fields_update(cls, v: object) -> object:
+        return deadline_input_to_utc(v)
 
     @field_validator("valor_frete", "distancia_km", mode="before")
     @classmethod
@@ -285,7 +296,7 @@ class FreightFrontendRead(BaseModel):
             cargo_description=freight.observacoes or "Carga não especificada",  # type: ignore[attr-defined]
             value_brl=freight.valor_frete,  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
-            deadline_at=deadline.isoformat() if deadline else None,
+            deadline_at=format_date_only_iso(deadline),
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
             driver_id=freight.driver_id,  # type: ignore[attr-defined]
             created_at=freight.created_at.isoformat(),  # type: ignore[attr-defined]

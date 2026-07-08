@@ -5,6 +5,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
@@ -16,6 +17,7 @@ from app.modules.fuel.schemas import (
     FuelRefillCreate,
     FuelRefillCreatedResponse,
     FuelRefillRead,
+    FuelRefillUpdate,
 )
 from app.modules.fuel.service import FuelService
 from app.modules.users.models import User
@@ -78,10 +80,17 @@ async def list_fuel_refills(
     current_user: Annotated[User, Depends(get_current_active_user)],
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[FuelRefillRead]:
     """Histórico geral de abastecimentos (admin/operador: todos; motorista: só os seus)."""
     service = FuelService(db, current_user.tenant_id)
-    return await service.list_all(PageParams(page=page, size=size), current_user)
+    return await service.list_all(
+        PageParams(page=page, size=size),
+        current_user,
+        competencia_mes=competencia_mes,
+        competencia_ano=competencia_ano,
+    )
 
 
 @router.get("/freight/{freight_id}", response_model=PagedResponse[FuelRefillRead])
@@ -104,3 +113,25 @@ async def get_fuel_refill(
 ) -> FuelRefillRead:
     service = FuelService(db, current_user.tenant_id)
     return await service.get_by_id(refill_id, current_user)
+
+
+@router.patch("/{refill_id}", response_model=FuelRefillRead)
+async def update_fuel_refill(
+    refill_id: uuid.UUID,
+    payload: FuelRefillUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FuelRefillRead:
+    service = FuelService(db, current_user.tenant_id)
+    return await service.update(refill_id, payload, current_user)
+
+
+@router.delete("/{refill_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_fuel_refill(
+    refill_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Response:
+    service = FuelService(db, current_user.tenant_id)
+    await service.delete(refill_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
