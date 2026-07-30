@@ -68,6 +68,20 @@ async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> Fin
     return await FinanceRepository(session, freight.tenant_id).create(entry)
 
 
+async def cancel_freight_revenue(session: AsyncSession, freight: Freight) -> None:
+    """Cancela a receita ao cancelar o frete (receita paga é preservada)."""
+    entry = await _find_by_source(session, f"{SOURCE_REVENUE}{freight.id}")
+    if entry and entry.status != FinanceEntryStatus.PAGO:
+        entry.status = FinanceEntryStatus.CANCELADO
+
+
+async def reactivate_freight_revenue(session: AsyncSession, freight: Freight) -> None:
+    """Reativa a receita cancelada ao reabrir um frete cancelado."""
+    entry = await _find_by_source(session, f"{SOURCE_REVENUE}{freight.id}")
+    if entry and entry.status == FinanceEntryStatus.CANCELADO:
+        entry.status = FinanceEntryStatus.PENDENTE
+
+
 async def create_fuel_expense(
     session: AsyncSession,
     refill: FuelRefill,

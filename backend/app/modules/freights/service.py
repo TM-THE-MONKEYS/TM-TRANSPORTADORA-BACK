@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.freights.models import Freight, FreightCost, FreightStop
@@ -129,9 +130,14 @@ class FreightService:
                     f"Transição inválida: {freight.status.value} → {data.status.value}"
                 )
         old_status = freight.status
-        for field, value in data.model_dump(exclude_none=True).items():
+        updated_fields = data.model_dump(exclude_none=True)
+        for field, value in updated_fields.items():
             setattr(freight, field, value)
         freight = await self._repo.update(freight)
+        if "valor_frete" in updated_fields or "data_entrega_prevista" in updated_fields:
+            from app.modules.finance.freight_sync import ensure_freight_revenue
+
+            await ensure_freight_revenue(self._session, freight)
         if data.status and data.status != old_status:
             await self._on_status_changed(freight, old_status, data.status)
         await self._session.commit()
@@ -153,8 +159,31 @@ class FreightService:
                 "Apenas fretes em orçamento ou cancelados podem ser removidos. "
                 "Administradores podem excluir fretes em qualquer status."
             )
+        removed_entries = await self._soft_delete_linked_finance_entries(freight_id)
         await self._repo.soft_delete(freight)
         await self._session.commit()
+        log.info(
+            "freight_deleted",
+            freight_id=str(freight_id),
+            finance_entries_removed=removed_entries,
+        )
+
+    async def _soft_delete_linked_finance_entries(self, freight_id: uuid.UUID) -> int:
+        """Exclui (soft) receitas/despesas em tm_finance_entries vinculadas ao frete."""
+        from app.modules.finance.models import FinanceEntry
+
+        result = await self._session.execute(
+            select(FinanceEntry).where(
+                FinanceEntry.freight_id == freight_id,
+                FinanceEntry.tenant_id == self._tenant_id,
+                FinanceEntry.deleted_at.is_(None),
+            )
+        )
+        entries = list(result.scalars().all())
+        for entry in entries:
+            entry.soft_delete()
+        await self._session.flush()
+        return len(entries)
 
     async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         self._check_write_access(requesting_user)
@@ -210,13 +239,19 @@ class FreightService:
     ) -> None:
         from app.modules.finance.freight_sync import (
             cancel_commission_expense,
+            cancel_freight_revenue,
             create_commission_expense,
+            reactivate_freight_revenue,
         )
 
         if old_status == FreightStatus.ENTREGUE and new_status != FreightStatus.ENTREGUE:
             await cancel_commission_expense(self._session, freight)
         if new_status == FreightStatus.ENTREGUE:
             await create_commission_expense(self._session, freight)
+        if new_status == FreightStatus.CANCELADO:
+            await cancel_freight_revenue(self._session, freight)
+        elif old_status == FreightStatus.CANCELADO:
+            await reactivate_freight_revenue(self._session, freight)
 
     async def list_costs(
         self, freight_id: uuid.UUID, requesting_user: User
