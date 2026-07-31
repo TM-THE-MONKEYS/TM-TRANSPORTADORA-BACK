@@ -132,6 +132,56 @@ async def test_delete_freight_removes_linked_finance_entries(
 
 
 @pytest.mark.asyncio
+async def test_delete_freight_cascades_costs_fuel_and_finance(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    admin_user: object,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    """Frete excluído remove custos, abastecimentos e lançamentos financeiros vinculados."""
+    from datetime import datetime, timezone
+
+    from app.modules.freights.models import FreightCost
+    from app.modules.fuel.models import FuelRefill
+
+    freight_id = await _create_freight(client, admin_headers, db_session, test_tenant)
+    fid = uuid.UUID(freight_id)
+
+    cost_resp = await client.post(
+        f"/api/v1/freights/{freight_id}/costs",
+        json={"tipo": "pedagio", "valor": 85.5, "descricao": "Teste cascade"},
+        headers=admin_headers,
+    )
+    assert cost_resp.status_code == 201, cost_resp.text
+    cost_id = uuid.UUID(cost_resp.json()["id"])
+
+    fuel = FuelRefill(
+        tenant_id=test_tenant.id,
+        freight_id=fid,
+        litros=50.0,
+        valor_total=300.0,
+        valor_litro=6.0,
+        data_abastecimento=datetime.now(timezone.utc),
+        posto="Posto Teste",
+    )
+    db_session.add(fuel)
+    await db_session.commit()
+    fuel_id = fuel.id
+
+    entries = await _active_finance_entries(db_session, freight_id)
+    assert len(entries) >= 2, "Receita + despesa do custo devem existir"
+
+    response = await client.delete(f"/api/v1/freights/{freight_id}", headers=admin_headers)
+    assert response.status_code == 204
+
+    db_session.expire_all()
+    assert await _active_finance_entries(db_session, freight_id) == []
+    assert await db_session.get(FreightCost, cost_id) is None
+    assert await db_session.get(FuelRefill, fuel_id) is None
+
+
+@pytest.mark.asyncio
 async def test_admin_can_delete_delivered_freight(
     client: AsyncClient,
     admin_headers: dict[str, str],

@@ -153,12 +153,14 @@ class FreightService:
                 "Administradores podem excluir fretes em qualquer status."
             )
         removed_entries = await self._soft_delete_linked_finance_entries(freight_id)
+        cascade_counts = await self._hard_delete_linked_operational_records(freight_id)
         await self._repo.soft_delete(freight)
         await self._session.commit()
         log.info(
             "freight_deleted",
             freight_id=str(freight_id),
             finance_entries_removed=removed_entries,
+            **cascade_counts,
         )
 
     async def _soft_delete_linked_finance_entries(self, freight_id: uuid.UUID) -> int:
@@ -177,6 +179,81 @@ class FreightService:
             entry.soft_delete()
         await self._session.flush()
         return len(entries)
+
+    async def _hard_delete_linked_operational_records(self, freight_id: uuid.UUID) -> dict[str, int]:
+        """Remove filhos operacionais (sem soft-delete) — frete de teste/erro não deixa órfãos.
+
+        Ordem: notificações → combustível/pedágio → tracking → anexos/custos/paradas.
+        Soft-delete do frete não dispara ON DELETE CASCADE do banco.
+        """
+        from sqlalchemy import delete
+
+        from app.modules.freights.models import FreightAttachment, FreightCost, FreightStop
+        from app.modules.fuel.models import FuelRefill
+        from app.modules.notifications.models import FreightNotification, NotificationRead
+        from app.modules.tolls.models import TollCharge
+        from app.modules.tracking.models import TrackingUpdate
+
+        notification_ids = select(FreightNotification.id).where(
+            FreightNotification.freight_id == freight_id,
+            FreightNotification.tenant_id == self._tenant_id,
+        )
+        reads = await self._session.execute(
+            delete(NotificationRead).where(NotificationRead.notification_id.in_(notification_ids))
+        )
+        notifications = await self._session.execute(
+            delete(FreightNotification).where(
+                FreightNotification.freight_id == freight_id,
+                FreightNotification.tenant_id == self._tenant_id,
+            )
+        )
+        fuel = await self._session.execute(
+            delete(FuelRefill).where(
+                FuelRefill.freight_id == freight_id,
+                FuelRefill.tenant_id == self._tenant_id,
+            )
+        )
+        tolls = await self._session.execute(
+            delete(TollCharge).where(
+                TollCharge.freight_id == freight_id,
+                TollCharge.tenant_id == self._tenant_id,
+            )
+        )
+        tracking = await self._session.execute(
+            delete(TrackingUpdate).where(
+                TrackingUpdate.freight_id == freight_id,
+                TrackingUpdate.tenant_id == self._tenant_id,
+            )
+        )
+        attachments = await self._session.execute(
+            delete(FreightAttachment).where(
+                FreightAttachment.freight_id == freight_id,
+                FreightAttachment.tenant_id == self._tenant_id,
+            )
+        )
+        costs = await self._session.execute(
+            delete(FreightCost).where(
+                FreightCost.freight_id == freight_id,
+                FreightCost.tenant_id == self._tenant_id,
+            )
+        )
+        stops = await self._session.execute(
+            delete(FreightStop).where(
+                FreightStop.freight_id == freight_id,
+                FreightStop.tenant_id == self._tenant_id,
+            )
+        )
+        await self._session.flush()
+        return {
+            "notification_reads_removed": reads.rowcount or 0,
+            "notifications_removed": notifications.rowcount or 0,
+            "fuel_refills_removed": fuel.rowcount or 0,
+            "toll_charges_removed": tolls.rowcount or 0,
+            "tracking_updates_removed": tracking.rowcount or 0,
+            "attachments_removed": attachments.rowcount or 0,
+            "costs_removed": costs.rowcount or 0,
+            "stops_removed": stops.rowcount or 0,
+        }
 
     async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         self._check_write_access(requesting_user)
