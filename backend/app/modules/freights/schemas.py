@@ -118,7 +118,7 @@ class FreightCreate(BaseModel):
     origem: AddressPoint
     destino: AddressPoint
     valor_frete: float = Field(gt=0)
-    status: FreightStatus = FreightStatus.ORCAMENTO
+    status: FreightStatus = FreightStatus.EM_TRANSPORTE
     data_coleta: datetime | None = None
     data_entrega_prevista: datetime | None = None
     distancia_km: float | None = Field(default=None, gt=0)

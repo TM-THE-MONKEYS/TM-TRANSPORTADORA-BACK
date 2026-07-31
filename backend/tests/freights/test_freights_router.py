@@ -141,11 +141,11 @@ async def test_admin_can_delete_delivered_freight(
 ) -> None:
     freight_id = await _create_freight(client, admin_headers, db_session, test_tenant)
 
-    for _ in range(4):  # orcamento → confirmado → em_coleta → em_transporte → entregue
-        response = await client.post(
-            f"/api/v1/freights/{freight_id}/advance-status", headers=admin_headers
-        )
-        assert response.status_code == 200, response.text
+    # fluxo simplificado: em_transporte (criação) → entregue
+    response = await client.post(
+        f"/api/v1/freights/{freight_id}/advance-status", headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "entregue"
 
     response = await client.delete(f"/api/v1/freights/{freight_id}", headers=admin_headers)
@@ -179,7 +179,7 @@ async def test_cancel_freight_cancels_pending_revenue(
     # reabrir frete cancelado reativa a receita
     response = await client.patch(
         f"/api/v1/freights/{freight_id}/status",
-        json={"status": "orcamento"},
+        json={"status": "em_transporte"},
         headers=admin_headers,
     )
     assert response.status_code == 200, response.text

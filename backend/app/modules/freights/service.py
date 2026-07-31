@@ -21,33 +21,24 @@ from app.shared.security.resource_access import (
 
 log = structlog.get_logger(__name__)
 
-_ALLOWED_TRANSITIONS: dict[FreightStatus, list[FreightStatus]] = {
-    FreightStatus.ORCAMENTO: [FreightStatus.CONFIRMADO, FreightStatus.CANCELADO],
-    FreightStatus.CONFIRMADO: [FreightStatus.EM_COLETA, FreightStatus.CANCELADO],
-    FreightStatus.EM_COLETA: [FreightStatus.EM_TRANSPORTE, FreightStatus.CANCELADO],
-    FreightStatus.EM_TRANSPORTE: [FreightStatus.ENTREGUE, FreightStatus.CANCELADO],
-    FreightStatus.ENTREGUE: [],
-    FreightStatus.CANCELADO: [],
-}
-
-
-def _is_valid_status_transition(current: FreightStatus, target: FreightStatus) -> bool:
-    """Allow forward/backward moves in the flow; cancelado ↔ orcamento for reopen."""
-    if current == target:
-        return True
-    if target == FreightStatus.CANCELADO:
-        return current != FreightStatus.CANCELADO
-    if current == FreightStatus.CANCELADO:
-        return target == FreightStatus.ORCAMENTO
-    return current in _STATUS_FLOW and target in _STATUS_FLOW
-
+# Fluxo simplificado: em_transporte → entregue, cancelado a partir de qualquer status.
+# Status legados (orcamento/confirmado/em_coleta) existem só em dados antigos — aceitos
+# como estado atual, mas nenhum frete pode voltar para eles.
 _STATUS_FLOW: list[FreightStatus] = [
-    FreightStatus.ORCAMENTO,
-    FreightStatus.CONFIRMADO,
-    FreightStatus.EM_COLETA,
     FreightStatus.EM_TRANSPORTE,
     FreightStatus.ENTREGUE,
 ]
+
+_LEGACY_STATUSES: frozenset[FreightStatus] = frozenset(
+    {FreightStatus.ORCAMENTO, FreightStatus.CONFIRMADO, FreightStatus.EM_COLETA}
+)
+
+
+def _is_valid_status_transition(current: FreightStatus, target: FreightStatus) -> bool:
+    """Qualquer transição entre em_transporte/entregue/cancelado; legado só como origem."""
+    if current == target:
+        return True
+    return target not in _LEGACY_STATUSES
 
 
 class FreightService:
@@ -190,13 +181,12 @@ class FreightService:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
-        try:
-            idx = _STATUS_FLOW.index(freight.status)
-        except ValueError:
-            raise ForbiddenException(f"Status {freight.status.value} não pode ser avançado")
-        if idx >= len(_STATUS_FLOW) - 1:
+        if freight.status in _LEGACY_STATUSES:
+            next_status = FreightStatus.EM_TRANSPORTE
+        elif freight.status == FreightStatus.EM_TRANSPORTE:
+            next_status = FreightStatus.ENTREGUE
+        else:
             raise ForbiddenException("Frete já está no status final")
-        next_status = _STATUS_FLOW[idx + 1]
         old_status = freight.status
         freight.status = next_status
         freight = await self._repo.update(freight)

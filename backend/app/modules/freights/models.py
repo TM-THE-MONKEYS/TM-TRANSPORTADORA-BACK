@@ -30,7 +30,7 @@ class Freight(TenantMixin, SoftDeleteMixin, BaseModel):
     status: Mapped[FreightStatus] = mapped_column(
         Enum(FreightStatus, name="freightstatus", create_type=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
-        default=FreightStatus.ORCAMENTO,
+        default=FreightStatus.EM_TRANSPORTE,
         index=True,
     )
     data_coleta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
