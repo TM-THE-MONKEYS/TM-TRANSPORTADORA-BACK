@@ -26,7 +26,7 @@ from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.trucks.models import Truck
 from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
-from app.shared.enums import ACTIVE_FREIGHT_STATUSES, FinanceEntryStatus, UserRole
+from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
@@ -281,11 +281,9 @@ class FuelService:
         if freight:
             await self._check_read_access(freight, user)
 
-        from app.modules.finance.freight_sync import SOURCE_FUEL, _find_by_source
+        from app.modules.finance.freight_sync import SOURCE_FUEL, soft_delete_by_source
 
-        finance_entry = await _find_by_source(self._session, f"{SOURCE_FUEL}{refill.id}")
-        if finance_entry:
-            finance_entry.status = FinanceEntryStatus.CANCELADO
+        await soft_delete_by_source(self._session, f"{SOURCE_FUEL}{refill.id}")
 
         if refill.freight_cost_id:
             cost = await self._session.get(FreightCost, refill.freight_cost_id)

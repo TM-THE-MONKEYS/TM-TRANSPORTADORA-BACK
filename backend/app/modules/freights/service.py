@@ -12,7 +12,7 @@ from app.modules.freights.repository import FreightRepository
 from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightStopCreate, FreightUpdate
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus, UserRole
-from app.shared.exceptions.custom import ForbiddenException, NotFoundException
+from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
     assert_freight_read_access,
@@ -24,11 +24,6 @@ log = structlog.get_logger(__name__)
 # Fluxo simplificado: em_transporte → entregue, cancelado a partir de qualquer status.
 # Status legados (orcamento/confirmado/em_coleta) existem só em dados antigos — aceitos
 # como estado atual, mas nenhum frete pode voltar para eles.
-_STATUS_FLOW: list[FreightStatus] = [
-    FreightStatus.EM_TRANSPORTE,
-    FreightStatus.ENTREGUE,
-]
-
 _LEGACY_STATUSES: frozenset[FreightStatus] = frozenset(
     {FreightStatus.ORCAMENTO, FreightStatus.CONFIRMADO, FreightStatus.EM_COLETA}
 )
@@ -62,10 +57,17 @@ class FreightService:
             stops = [self._stop_from_payload(p) for p in data.paradas]
             saved_stops = await self._repo.add_stops(freight.id, stops)
             freight.stops = saved_stops
-        for cost_data in data.costs:
-            await self._repo.add_cost(freight.id, cost_data.tipo, cost_data.valor, cost_data.descricao)
-        from app.modules.finance.freight_sync import ensure_freight_revenue
+        from app.modules.finance.freight_sync import create_cost_expense, ensure_freight_revenue, is_fuel_cost_tipo
 
+        for cost_data in data.costs:
+            if is_fuel_cost_tipo(cost_data.tipo):
+                raise BadRequestException(
+                    "Registre combustível pela tela de Abastecimento para evitar duplicidade no financeiro"
+                )
+            cost = await self._repo.add_cost(
+                freight.id, cost_data.tipo, cost_data.valor, cost_data.descricao
+            )
+            await create_cost_expense(self._session, cost)
         await ensure_freight_revenue(self._session, freight)
         freight_id = freight.id
         await self._session.commit()
@@ -257,9 +259,13 @@ class FreightService:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
-        cost = await self._repo.add_cost(freight_id, data.tipo, data.valor, data.descricao)
-        from app.modules.finance.freight_sync import create_cost_expense
+        from app.modules.finance.freight_sync import create_cost_expense, is_fuel_cost_tipo
 
+        if is_fuel_cost_tipo(data.tipo):
+            raise BadRequestException(
+                "Registre combustível pela tela de Abastecimento para evitar duplicidade no financeiro"
+            )
+        cost = await self._repo.add_cost(freight_id, data.tipo, data.valor, data.descricao)
         await create_cost_expense(self._session, cost)
         await self._session.commit()
         return cost

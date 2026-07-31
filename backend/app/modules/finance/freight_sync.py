@@ -1,8 +1,9 @@
 """Sincroniza receitas e despesas de fretes com tm_finance_entries."""
 from __future__ import annotations
 
+import unicodedata
 import uuid  # noqa: TC003 — used at runtime in function signature
-from datetime import date, datetime, timezone
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,22 @@ SOURCE_REVENUE = "freight_revenue:"
 SOURCE_FUEL = "fuel_refill:"
 SOURCE_TOLL = "toll_charge:"
 SOURCE_COST = "freight_cost:"
+SOURCE_COMMISSION = "commission:"
 COMMISSION_CATEGORY = "Comissão"
+
+
+def normalize_cost_tipo(tipo: str | None) -> str:
+    """Uppercase sem acentos — 'Pedágio' → 'PEDAGIO'."""
+    raw = unicodedata.normalize("NFD", tipo or "")
+    return "".join(c for c in raw if unicodedata.category(c) != "Mn").upper()
+
+
+def is_fuel_cost_tipo(tipo: str | None) -> bool:
+    return "COMBUST" in normalize_cost_tipo(tipo)
+
+
+def is_toll_cost_tipo(tipo: str | None) -> bool:
+    return "PEDAGIO" in normalize_cost_tipo(tipo)
 
 
 async def _find_by_source(session: AsyncSession, source_key: str) -> FinanceEntry | None:
@@ -32,6 +48,13 @@ async def _find_by_source(session: AsyncSession, source_key: str) -> FinanceEntr
         )
     )
     return result.scalar_one_or_none()
+
+
+async def soft_delete_by_source(session: AsyncSession, source_key: str) -> None:
+    """Remove espelho financeiro (soft-delete) — não deixa fantasma em cash-flow."""
+    entry = await _find_by_source(session, source_key)
+    if entry:
+        entry.soft_delete()
 
 
 async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> FinanceEntry | None:
@@ -150,11 +173,13 @@ async def create_toll_expense(
 
 
 async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> FinanceEntry | None:
-    """Despesa genérica a partir de tm_freight_costs (exceto combustível já vinculado a abastecimento)."""
+    """Despesa genérica a partir de tm_freight_costs (exceto combustível/pedágio já vinculados)."""
     if float(cost.valor or 0) <= 0:
         return None
 
-    tipo_norm = (cost.tipo or "").upper()
+    tipo_norm = normalize_cost_tipo(cost.tipo)
+
+    # Custos criados pelo fluxo de abastecimento — espelho é fuel_refill:*
     if "COMBUST" in tipo_norm:
         linked = await session.execute(
             select(FuelRefill.id).where(FuelRefill.freight_cost_id == cost.id).limit(1)
@@ -162,6 +187,7 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
         if linked.scalar_one_or_none():
             return None
 
+    # Custos criados pelo fluxo de pedágio operacional — espelho é toll_charge:*
     if "PEDAGIO" in tipo_norm:
         linked_toll = await session.execute(
             select(TollCharge.id).where(TollCharge.freight_cost_id == cost.id).limit(1)
@@ -171,7 +197,12 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
 
     source_key = f"{SOURCE_COST}{cost.id}"
     existing = await _find_by_source(session, source_key)
-    categoria = "Combustível" if "COMBUST" in tipo_norm else cost.tipo.title()
+    if "COMBUST" in tipo_norm:
+        categoria = "Combustível"
+    elif "PEDAGIO" in tipo_norm:
+        categoria = "Pedágio"
+    else:
+        categoria = (cost.tipo or "Outro").title()
     descricao = cost.descricao or f"Custo {cost.tipo}"
 
     if existing:
@@ -200,6 +231,10 @@ async def find_commission_expense(
     freight_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> FinanceEntry | None:
+    by_source = await _find_by_source(session, f"{SOURCE_COMMISSION}{freight_id}")
+    if by_source:
+        return by_source
+
     result = await session.execute(
         select(FinanceEntry).where(
             FinanceEntry.freight_id == freight_id,
@@ -225,6 +260,8 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
     if existing:
         if existing.status == FinanceEntryStatus.CANCELADO:
             existing.status = FinanceEntryStatus.PENDENTE
+        if not existing.observacoes:
+            existing.observacoes = f"{SOURCE_COMMISSION}{freight.id}"
         return existing
 
     driver = await session.get(Driver, freight.driver_id)
@@ -248,6 +285,7 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
         freight_id=freight.id,
         data_vencimento=vencimento,
         status=FinanceEntryStatus.PENDENTE,
+        observacoes=f"{SOURCE_COMMISSION}{freight.id}",
         tenant_id=freight.tenant_id,
     )
     return await FinanceRepository(session, freight.tenant_id).create(entry)
@@ -264,7 +302,7 @@ async def cancel_commission_expense(session: AsyncSession, freight: Freight) -> 
 
 
 async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) -> dict[str, int]:
-    """Backfill: receitas de fretes + despesas de abastecimentos e custos."""
+    """Backfill: receitas de fretes + despesas de abastecimentos, pedágios e custos."""
     stats = {"receitas": 0, "despesas": 0}
 
     freights = (
@@ -287,6 +325,16 @@ async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) ->
     for refill in refills:
         desc = refill.posto or refill.observacoes or f"Abastecimento {refill.litros:.0f}L"
         await create_fuel_expense(session, refill, desc)
+        stats["despesas"] += 1
+
+    tolls = (
+        await session.execute(
+            select(TollCharge).where(TollCharge.tenant_id == tenant_id)
+        )
+    ).scalars().all()
+    for charge in tolls:
+        desc = charge.praca or charge.observacoes or f"Pedágio R$ {float(charge.valor):.2f}"
+        await create_toll_expense(session, charge, desc)
         stats["despesas"] += 1
 
     costs = (

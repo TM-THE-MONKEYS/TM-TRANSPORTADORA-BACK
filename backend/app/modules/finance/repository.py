@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from calendar import monthrange
 from datetime import date, timedelta
 
 import structlog
@@ -83,7 +82,11 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
             FinanceEntry.tipo,
             FinanceEntry.status,
             func.sum(FinanceEntry.valor).label("total"),
-        ).where(FinanceEntry.deleted_at.is_(None), FinanceEntry.tenant_id == self._tenant_id)
+        ).where(
+            FinanceEntry.deleted_at.is_(None),
+            FinanceEntry.tenant_id == self._tenant_id,
+            FinanceEntry.status != FinanceEntryStatus.CANCELADO,
+        )
 
         if competencia_mes and competencia_ano:
             base = apply_competencia_filter(base, competencia_ano, competencia_mes)
