@@ -7,14 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.clients.models import Client
 from app.modules.freights.models import Freight
+from app.modules.tenants.models import Tenant
 from app.shared.enums import FreightStatus
 
 
-async def _create_freight(db_session: AsyncSession) -> Freight:
+async def _create_freight(db_session: AsyncSession, tenant: Tenant) -> Freight:
     client = Client(
         nome="Cliente Rastreamento",
         cpf_cnpj="52998224725",
         is_active=True,
+        tenant_id=tenant.id,
     )
     db_session.add(client)
     await db_session.flush()
@@ -25,6 +27,7 @@ async def _create_freight(db_session: AsyncSession) -> Freight:
         destino={"cidade": "Rio de Janeiro", "estado": "RJ", "logradouro": "Rua B"},
         valor_frete=1500.0,
         status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=tenant.id,
     )
     db_session.add(freight)
     await db_session.commit()
@@ -38,8 +41,9 @@ async def test_add_tracking_update(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight = await _create_freight(db_session)
+    freight = await _create_freight(db_session, test_tenant)
 
     response = await client.post(
         "/api/v1/tracking",
@@ -64,8 +68,9 @@ async def test_get_tracking_timeline(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight = await _create_freight(db_session)
+    freight = await _create_freight(db_session, test_tenant)
 
     # Add two tracking updates
     for status, city in [("coletado", "SP"), ("em_transito", "CWB")]:
@@ -97,8 +102,9 @@ async def test_get_empty_timeline(
     admin_headers: dict[str, str],
     admin_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight = await _create_freight(db_session)
+    freight = await _create_freight(db_session, test_tenant)
     response = await client.get(
         f"/api/v1/tracking/{freight.id}/timeline",
         headers=admin_headers,

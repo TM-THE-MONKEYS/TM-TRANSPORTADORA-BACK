@@ -34,7 +34,7 @@ async def test_create_truck_with_br_decimal_format(
     response = await client.post(
         "/api/v1/trucks",
         json={
-            "placa": "br1d23",
+            "placa": "abc1d23",
             "modelo": "fh 540",
             "marca": "volvo",
             "ano": 2022,
@@ -46,7 +46,7 @@ async def test_create_truck_with_br_decimal_format(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["plate"] == "BR1D23"
+    assert data["plate"] == "ABC1D23"
     assert data["brand"] == "VOLVO"
     assert data["capacity_kg"] == 30000.5
 
@@ -70,7 +70,7 @@ async def test_create_truck_with_frontend_aliases(
     assert response.status_code == 201
     data = response.json()
     assert data["plate"] == "FR0NT01"
-    assert data["brand"] == "Scania"
+    assert data["brand"] == "SCANIA"
 
 
 @pytest.mark.asyncio

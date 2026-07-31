@@ -20,12 +20,13 @@ from app.modules.fuel.schemas import (
     FuelRefillCreate,
     FuelRefillCreatedResponse,
     FuelRefillRead,
+    FuelRefillUpdate,
 )
 from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.trucks.models import Truck
 from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
-from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
+from app.shared.enums import ACTIVE_FREIGHT_STATUSES, FinanceEntryStatus, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
@@ -214,6 +215,87 @@ class FuelService:
             notification_id=notification.id,
         )
 
+    async def update(
+        self, refill_id: uuid.UUID, data: FuelRefillUpdate, user: User
+    ) -> FuelRefillRead:
+        self._check_write_access(user)
+        if user.role == UserRole.MOTORISTA:
+            raise ForbiddenException("Motoristas não podem editar abastecimentos")
+
+        refill = await self._repo.get_by_id(refill_id)
+        if not refill:
+            raise NotFoundException("Abastecimento não encontrado")
+
+        freight = await self._freight_repo.get_by_id(refill.freight_id)
+        if freight:
+            await self._check_read_access(freight, user)
+
+        updates = data.model_dump(exclude_none=True)
+        if not updates:
+            return await self._enrich_read(refill)
+
+        if "litros" in updates or "valor_total" in updates:
+            litros = float(updates.get("litros", refill.litros))
+            valor_total = float(updates.get("valor_total", refill.valor_total))
+            if updates.get("valor_litro") is None and litros > 0:
+                updates["valor_litro"] = round(valor_total / litros, 4)
+
+        for field, value in updates.items():
+            setattr(refill, field, value)
+
+        cost_desc = self._build_cost_description(
+            float(refill.litros),
+            float(refill.valor_total),
+            refill.posto,
+            refill.cidade,
+        )
+
+        if refill.freight_cost_id:
+            cost = await self._session.get(FreightCost, refill.freight_cost_id)
+            if cost:
+                cost.valor = float(refill.valor_total)
+                cost.descricao = cost_desc
+
+        from app.modules.finance.freight_sync import create_fuel_expense
+
+        await create_fuel_expense(self._session, refill, cost_desc)
+
+        if refill.truck_id and refill.km_atual is not None:
+            await self._sync_truck_km(refill.truck_id, float(refill.km_atual))
+
+        refill = await self._repo.update(refill)
+        await self._session.commit()
+        log.info("fuel_refill_updated", refill_id=str(refill.id))
+        return await self._enrich_read(refill)
+
+    async def delete(self, refill_id: uuid.UUID, user: User) -> None:
+        self._check_write_access(user)
+        if user.role == UserRole.MOTORISTA:
+            raise ForbiddenException("Motoristas não podem excluir abastecimentos")
+
+        refill = await self._repo.get_by_id(refill_id)
+        if not refill:
+            raise NotFoundException("Abastecimento não encontrado")
+
+        freight = await self._freight_repo.get_by_id(refill.freight_id)
+        if freight:
+            await self._check_read_access(freight, user)
+
+        from app.modules.finance.freight_sync import SOURCE_FUEL, _find_by_source
+
+        finance_entry = await _find_by_source(self._session, f"{SOURCE_FUEL}{refill.id}")
+        if finance_entry:
+            finance_entry.status = FinanceEntryStatus.CANCELADO
+
+        if refill.freight_cost_id:
+            cost = await self._session.get(FreightCost, refill.freight_cost_id)
+            if cost:
+                await self._session.delete(cost)
+
+        await self._session.delete(refill)
+        await self._session.commit()
+        log.info("fuel_refill_deleted", refill_id=str(refill_id))
+
     @staticmethod
     def _build_cost_description(
         litros: float,
@@ -244,6 +326,9 @@ class FuelService:
         self,
         params: PageParams,
         user: User,
+        *,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> PagedResponse[FuelRefillRead]:
         if user.role not in _READ_ELIGIBLE_ROLES:
             raise ForbiddenException("Acesso negado")
@@ -258,6 +343,8 @@ class FuelService:
             driver_id=driver_filter,
             limit=params.size,
             offset=params.offset,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
         )
         reads = [await self._enrich_read(r) for r in items]
         return PagedResponse.create(reads, total, params)

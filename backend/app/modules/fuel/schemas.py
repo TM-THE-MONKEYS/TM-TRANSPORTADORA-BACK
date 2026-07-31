@@ -7,7 +7,8 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.shared.utils.data_normalization import FUEL_CREATE_RULES, parse_decimal_br
-from app.shared.utils.field_aliases import normalize_create_payload
+from app.shared.utils.dates import deadline_input_to_utc, normalize_date_only_value
+from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
 
 
 FUEL_FIELD_ALIASES: dict[str, str] = {
@@ -62,6 +63,38 @@ class FuelRefillCreate(BaseModel):
     @classmethod
     def normalize_decimals(cls, v: object) -> object:
         return parse_decimal_br(v) if v is not None else v
+
+    @field_validator("data_abastecimento", mode="before")
+    @classmethod
+    def normalize_refuel_date(cls, v: object) -> object:
+        return deadline_input_to_utc(v)
+
+
+class FuelRefillUpdate(BaseModel):
+    litros: float | None = Field(default=None, gt=0)
+    valor_total: float | None = Field(default=None, gt=0)
+    valor_litro: float | None = Field(default=None, gt=0)
+    km_atual: float | None = Field(default=None, ge=0)
+    posto: str | None = Field(default=None, max_length=150)
+    cidade: str | None = Field(default=None, max_length=100)
+    estado: str | None = Field(default=None, max_length=2)
+    observacoes: str | None = None
+    data_abastecimento: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data: object) -> object:
+        return normalize_update_payload(data, FUEL_FIELD_ALIASES, field_rules=FUEL_CREATE_RULES)
+
+    @field_validator("litros", "valor_total", "valor_litro", "km_atual", mode="before")
+    @classmethod
+    def normalize_decimals(cls, v: object) -> object:
+        return parse_decimal_br(v) if v is not None else v
+
+    @field_validator("data_abastecimento", mode="before")
+    @classmethod
+    def normalize_refuel_date(cls, v: object) -> object:
+        return deadline_input_to_utc(v)
 
 
 class FuelRefillRead(BaseModel):

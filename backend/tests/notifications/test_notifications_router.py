@@ -7,11 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.clients.models import Client
 from app.modules.freights.models import Freight
+from app.modules.tenants.models import Tenant
 from app.shared.enums import FreightStatus
 
 
-async def _create_freight(db_session: AsyncSession) -> Freight:
-    client = Client(nome="Cliente Notif", cpf_cnpj="39053344705", is_active=True)
+async def _create_freight(db_session: AsyncSession, tenant: Tenant) -> Freight:
+    client = Client(
+        nome="Cliente Notif", cpf_cnpj="39053344705", is_active=True, tenant_id=tenant.id
+    )
     db_session.add(client)
     await db_session.flush()
     freight = Freight(
@@ -20,6 +23,7 @@ async def _create_freight(db_session: AsyncSession) -> Freight:
         destino={"cidade": "CURITIBA", "estado": "PR", "logradouro": "RUA B"},
         valor_frete=2000.0,
         status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=tenant.id,
     )
     db_session.add(freight)
     await db_session.commit()
@@ -33,8 +37,9 @@ async def test_tracking_creates_notification(
     operador_headers: dict[str, str],
     admin_headers: dict[str, str],
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight = await _create_freight(db_session)
+    freight = await _create_freight(db_session, test_tenant)
 
     create_resp = await client.post(
         "/api/v1/tracking",
@@ -66,8 +71,9 @@ async def test_tracking_detail_endpoint(
     client: AsyncClient,
     operador_headers: dict[str, str],
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight = await _create_freight(db_session)
+    freight = await _create_freight(db_session, test_tenant)
     await client.post(
         "/api/v1/tracking",
         json={

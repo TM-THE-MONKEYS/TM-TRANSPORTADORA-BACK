@@ -7,14 +7,24 @@ from datetime import date
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.finance.competencia_schemas import (
+    FixedExpenseLaunchStatusItem,
+    LaunchPendingResponse,
+)
+from app.modules.finance.fixed_expense_launch import (
+    find_launch_for_month,
+    launch_fixed_expense_for_month,
+    launch_fixed_expense_manual,
+    resolve_vencimento,
+)
 from app.modules.finance.fixed_expense_repository import FixedExpenseRepository
 from app.modules.finance.fixed_expense_schemas import FixedExpenseCreate, FixedExpenseUpdate
-from app.modules.finance.fixed_expense_utils import is_expired, refresh_expiry
+from app.modules.finance.fixed_expense_utils import refresh_expiry
 from app.modules.finance.models import FinanceEntry, FixedExpense
-from app.modules.finance.repository import FinanceRepository
 from app.modules.users.models import User
-from app.shared.enums import FinanceEntryStatus, FinanceEntryType, UserRole
-from app.shared.exceptions.custom import ForbiddenException, NotFoundException, ValidationException
+from app.shared.enums import UserRole
+from app.shared.exceptions.custom import ForbiddenException, NotFoundException
+from app.shared.utils.dates import normalize_date_only_value, today_sp
 
 log = structlog.get_logger(__name__)
 
@@ -27,7 +37,6 @@ class FixedExpenseService:
         self._session = session
         self._tenant_id = tenant_id
         self._repo = FixedExpenseRepository(session, tenant_id)
-        self._finance_repo = FinanceRepository(session, tenant_id)
 
     def _check_read(self, user: User) -> None:
         if user.role not in _READ_ROLES:
@@ -75,36 +84,16 @@ class FixedExpenseService:
         await self._session.commit()
         return expense
 
-    async def launch(self, expense_id: uuid.UUID, launched_by: User) -> FinanceEntry:
+    async def launch(
+        self,
+        expense_id: uuid.UUID,
+        launched_by: User,
+        vencimento: date | None = None,
+    ) -> FinanceEntry:
         self._check_write(launched_by)
         expense = await self._refresh_and_get(expense_id)
-        if not expense.ativo or is_expired(expense):
-            raise ValidationException(
-                "Gasto fixo inativo ou expirado — lançamento não permitido"
-            )
-
-        vencimento: date | None = None
-        if expense.dia_vencimento:
-            today = date.today()
-            try:
-                vencimento = today.replace(day=expense.dia_vencimento)
-            except ValueError:
-                vencimento = today
-
-        entry = FinanceEntry(
-            tipo=FinanceEntryType.DESPESA,
-            categoria=expense.categoria,
-            descricao=f"Gasto fixo: {expense.nome}",
-            valor=float(expense.valor),
-            status=FinanceEntryStatus.PENDENTE,
-            data_vencimento=vencimento,
-            observacoes=f"fixed_expense:{expense.id}",
-            tenant_id=self._tenant_id,
-        )
-        entry = await self._finance_repo.create(entry)
-
-        expense.parcelas_lancadas += 1
-        refresh_expiry(expense)
+        ref = normalize_date_only_value(vencimento) if vencimento else today_sp()
+        entry = await launch_fixed_expense_manual(self._session, expense, vencimento=ref)
         await self._repo.update(expense)
         await self._session.commit()
         log.info(
@@ -121,3 +110,67 @@ class FixedExpenseService:
         await self._repo.soft_delete(expense)
         await self._session.commit()
         log.info("fixed_expense_deleted", expense_id=str(expense.id))
+
+    async def launch_status(
+        self,
+        requesting_user: User,
+        competencia_mes: int,
+        competencia_ano: int,
+    ) -> list[FixedExpenseLaunchStatusItem]:
+        self._check_read(requesting_user)
+        items = await self.list(requesting_user)
+        ref = date(competencia_ano, competencia_mes, 1)
+        result: list[FixedExpenseLaunchStatusItem] = []
+        for expense in items:
+            if not expense.ativo:
+                continue
+            linked = await find_launch_for_month(
+                self._session, expense.id, competencia_ano, competencia_mes
+            )
+            result.append(
+                FixedExpenseLaunchStatusItem(
+                    id=expense.id,
+                    nome=expense.nome,
+                    categoria=expense.categoria,
+                    valor=float(expense.valor),
+                    ativo=expense.ativo,
+                    launched_this_month=linked is not None,
+                    linked_entry_id=linked.id if linked else None,
+                    suggested_vencimento=resolve_vencimento(expense, ref),
+                )
+            )
+        return result
+
+    async def launch_pending(
+        self,
+        launched_by: User,
+        competencia_mes: int,
+        competencia_ano: int,
+    ) -> LaunchPendingResponse:
+        self._check_write(launched_by)
+        ref = date(competencia_ano, competencia_mes, 1)
+        items = await self._repo.list_active()
+        launched = 0
+        skipped = 0
+        for expense in items:
+            refresh_expiry(expense)
+            if not expense.ativo:
+                skipped += 1
+                continue
+            existing = await find_launch_for_month(
+                self._session, expense.id, competencia_ano, competencia_mes
+            )
+            if existing:
+                skipped += 1
+                continue
+            before = expense.parcelas_lancadas
+            entry = await launch_fixed_expense_for_month(
+                self._session, expense, reference=ref, increment_parcel=True
+            )
+            if entry and expense.parcelas_lancadas > before:
+                launched += 1
+                await self._repo.update(expense)
+            else:
+                skipped += 1
+        await self._session.commit()
+        return LaunchPendingResponse(launched_count=launched, skipped_count=skipped)

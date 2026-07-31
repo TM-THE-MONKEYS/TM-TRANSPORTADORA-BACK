@@ -11,6 +11,7 @@ from app.core.security.password import hash_password
 from app.modules.clients.models import Client
 from app.modules.drivers.models import Driver
 from app.modules.freights.models import Freight
+from app.modules.tenants.models import Tenant
 from app.modules.users.models import User
 from app.shared.enums import CNHCategory, DriverStatus, FreightStatus, UserRole
 from app.core.security.jwt import create_access_token
@@ -18,6 +19,7 @@ from app.core.security.jwt import create_access_token
 
 async def _setup_freight_with_driver(
     db_session: AsyncSession,
+    tenant: Tenant,
 ) -> tuple[Freight, Driver, User]:
     motorista_user = User(
         nome="Motorista Fuel",
@@ -25,6 +27,7 @@ async def _setup_freight_with_driver(
         hashed_password=hash_password("Motorista@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=tenant.id,
     )
     db_session.add(motorista_user)
     await db_session.flush()
@@ -37,11 +40,14 @@ async def _setup_freight_with_driver(
         cnh_category=CNHCategory.C,
         cnh_expiry=date(2030, 12, 31),
         status=DriverStatus.ATIVO,
+        tenant_id=tenant.id,
     )
     db_session.add(driver)
     await db_session.flush()
 
-    client = Client(nome="Cliente Fuel", cpf_cnpj="11222333000181", is_active=True)
+    client = Client(
+        nome="Cliente Fuel", cpf_cnpj="11222333000181", is_active=True, tenant_id=tenant.id
+    )
     db_session.add(client)
     await db_session.flush()
 
@@ -52,6 +58,7 @@ async def _setup_freight_with_driver(
         destino={"cidade": "FLORIANÓPOLIS", "estado": "SC", "logradouro": "RUA B"},
         valor_frete=5000.0,
         status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=tenant.id,
     )
     db_session.add(freight)
     await db_session.commit()
@@ -66,8 +73,9 @@ async def test_register_fuel_refill_br_decimal(
     client: AsyncClient,
     operador_headers: dict[str, str],
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, driver, _ = await _setup_freight_with_driver(db_session)
+    freight, driver, _ = await _setup_freight_with_driver(db_session, test_tenant)
 
     response = await client.post(
         "/api/v1/fuel",
@@ -96,9 +104,10 @@ async def test_register_fuel_refill_br_decimal(
 async def test_active_freight_for_motorista(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, driver, motorista_user = await _setup_freight_with_driver(db_session)
-    token = create_access_token(motorista_user.id, motorista_user.role)
+    freight, driver, motorista_user = await _setup_freight_with_driver(db_session, test_tenant)
+    token = create_access_token(motorista_user.id, motorista_user.role, tenant_id=motorista_user.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get("/api/v1/fuel/active-freight", headers=headers)
@@ -112,9 +121,10 @@ async def test_active_freight_for_motorista(
 async def test_motorista_registers_fuel_without_driver_id(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, _, motorista_user = await _setup_freight_with_driver(db_session)
-    token = create_access_token(motorista_user.id, motorista_user.role)
+    freight, _, motorista_user = await _setup_freight_with_driver(db_session, test_tenant)
+    token = create_access_token(motorista_user.id, motorista_user.role, tenant_id=motorista_user.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.post(
@@ -135,8 +145,9 @@ async def test_motorista_registers_fuel_without_driver_id(
 async def test_eligible_freights_excludes_entregue_for_motorista(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, driver, motorista_user = await _setup_freight_with_driver(db_session)
+    freight, driver, motorista_user = await _setup_freight_with_driver(db_session, test_tenant)
     freight_entregue = Freight(
         client_id=freight.client_id,
         driver_id=driver.id,
@@ -144,11 +155,12 @@ async def test_eligible_freights_excludes_entregue_for_motorista(
         destino={"cidade": "RIO", "estado": "RJ"},
         valor_frete=3000.0,
         status=FreightStatus.ENTREGUE,
+        tenant_id=test_tenant.id,
     )
     db_session.add(freight_entregue)
     await db_session.commit()
 
-    token = create_access_token(motorista_user.id, motorista_user.role)
+    token = create_access_token(motorista_user.id, motorista_user.role, tenant_id=motorista_user.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get("/api/v1/fuel/eligible-freights", headers=headers)
@@ -162,8 +174,9 @@ async def test_eligible_freights_excludes_entregue_for_motorista(
 async def test_motorista_cannot_fuel_other_drivers_freight(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, _, _ = await _setup_freight_with_driver(db_session)
+    freight, _, _ = await _setup_freight_with_driver(db_session, test_tenant)
 
     other_motorista = User(
         nome="Outro Motorista",
@@ -171,6 +184,7 @@ async def test_motorista_cannot_fuel_other_drivers_freight(
         hashed_password=hash_password("Motorista@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=test_tenant.id,
     )
     db_session.add(other_motorista)
     await db_session.flush()
@@ -183,12 +197,13 @@ async def test_motorista_cannot_fuel_other_drivers_freight(
         cnh_category=CNHCategory.C,
         cnh_expiry=date(2030, 12, 31),
         status=DriverStatus.ATIVO,
+        tenant_id=test_tenant.id,
     )
     db_session.add(other_driver)
     await db_session.commit()
     await db_session.refresh(other_motorista)
 
-    token = create_access_token(other_motorista.id, other_motorista.role)
+    token = create_access_token(other_motorista.id, other_motorista.role, tenant_id=other_motorista.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.post(
@@ -208,8 +223,9 @@ async def test_operador_cannot_use_wrong_driver_id_on_fuel(
     client: AsyncClient,
     operador_headers: dict[str, str],
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, driver, _ = await _setup_freight_with_driver(db_session)
+    freight, driver, _ = await _setup_freight_with_driver(db_session, test_tenant)
 
     other_driver = Driver(
         nome="MOTORISTA EXTRA",
@@ -218,6 +234,7 @@ async def test_operador_cannot_use_wrong_driver_id_on_fuel(
         cnh_category=CNHCategory.C,
         cnh_expiry=date(2030, 12, 31),
         status=DriverStatus.ATIVO,
+        tenant_id=test_tenant.id,
     )
     db_session.add(other_driver)
     await db_session.commit()

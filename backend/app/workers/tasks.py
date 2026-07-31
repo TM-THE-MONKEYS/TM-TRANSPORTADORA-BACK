@@ -62,7 +62,9 @@ def mark_overdue_payments(self) -> dict[str, int]:  # type: ignore[no-untyped-de
         from app.modules.finance.models import FinanceEntry
         from app.shared.enums import FinanceEntryStatus
 
-        today = date.today()
+        from app.shared.utils.dates import today_sp
+
+        today = today_sp()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(FinanceEntry)
@@ -115,6 +117,47 @@ def deactivate_expired_fixed_expenses(self) -> dict[str, int]:  # type: ignore[n
         return _run_async(_run())
     except Exception as exc:
         log.exception("deactivate_expired_fixed_expenses_failed", exc=str(exc))
+        raise self.retry(exc=exc, countdown=3600)
+
+
+@celery_app.task(name="app.workers.tasks.launch_monthly_fixed_expenses", bind=True, max_retries=3)
+def launch_monthly_fixed_expenses(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    """Lança automaticamente gastos fixos ativos para o mês corrente (idempotente)."""
+    async def _run() -> dict[str, int]:
+        from sqlalchemy import select
+
+        from app.core.database.session import AsyncSessionLocal
+        from app.modules.finance.fixed_expense_launch import launch_fixed_expense_for_month
+        from app.modules.finance.fixed_expense_repository import FixedExpenseRepository
+        from app.modules.finance.models import FixedExpense
+        from app.shared.utils.dates import today_sp
+
+        reference = today_sp()
+        launched = 0
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(FixedExpense).where(
+                    FixedExpense.deleted_at.is_(None),
+                    FixedExpense.ativo.is_(True),
+                )
+            )
+            for expense in result.scalars().all():
+                before_parcelas = expense.parcelas_lancadas
+                entry = await launch_fixed_expense_for_month(
+                    session, expense, reference=reference, increment_parcel=True
+                )
+                if entry and expense.parcelas_lancadas > before_parcelas:
+                    launched += 1
+                    repo = FixedExpenseRepository(session, expense.tenant_id)
+                    await repo.update(expense)
+            await session.commit()
+        log.info("monthly_fixed_expenses_launched", count=launched, month=reference.isoformat())
+        return {"launched_count": launched}
+
+    try:
+        return _run_async(_run())
+    except Exception as exc:
+        log.exception("launch_monthly_fixed_expenses_failed", exc=str(exc))
         raise self.retry(exc=exc, countdown=3600)
 
 

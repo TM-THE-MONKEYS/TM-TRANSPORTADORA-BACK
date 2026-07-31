@@ -55,9 +55,11 @@ async def test_fixed_expense_launch_until_expired(
     assert create_resp.status_code == 201
     expense_id = create_resp.json()["id"]
 
-    for _ in range(3):
+    for i in range(3):
+        month = i + 1
         launch = await client.post(
             f"/api/v1/finance/fixed-expenses/{expense_id}/launch",
+            json={"data_vencimento": f"2026-{month:02d}-10"},
             headers=headers,
         )
         assert launch.status_code == 200

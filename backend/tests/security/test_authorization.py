@@ -13,14 +13,18 @@ from app.core.security.password import hash_password
 from app.modules.clients.models import Client
 from app.modules.drivers.models import Driver
 from app.modules.freights.models import Freight
+from app.modules.tenants.models import Tenant
 from app.modules.users.models import User
 from app.shared.enums import CNHCategory, DriverStatus, FreightStatus, UserRole
 
 
 async def _setup_two_drivers_freight(
     db_session: AsyncSession,
+    tenant: Tenant,
 ) -> tuple[Freight, User, User, Driver]:
-    client = Client(nome="Cliente Sec", cpf_cnpj="11222333000181", is_active=True)
+    client = Client(
+        nome="Cliente Sec", cpf_cnpj="11222333000181", is_active=True, tenant_id=tenant.id
+    )
     db_session.add(client)
     await db_session.flush()
 
@@ -30,6 +34,7 @@ async def _setup_two_drivers_freight(
         hashed_password=hash_password("Motorista@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=tenant.id,
     )
     intruder_user = User(
         nome="Motorista Intruso",
@@ -37,6 +42,7 @@ async def _setup_two_drivers_freight(
         hashed_password=hash_password("Motorista@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=tenant.id,
     )
     db_session.add_all([owner_user, intruder_user])
     await db_session.flush()
@@ -49,6 +55,7 @@ async def _setup_two_drivers_freight(
         cnh_category=CNHCategory.C,
         cnh_expiry=date(2030, 12, 31),
         status=DriverStatus.ATIVO,
+        tenant_id=tenant.id,
     )
     intruder_driver = Driver(
         user_id=intruder_user.id,
@@ -58,6 +65,7 @@ async def _setup_two_drivers_freight(
         cnh_category=CNHCategory.C,
         cnh_expiry=date(2030, 12, 31),
         status=DriverStatus.ATIVO,
+        tenant_id=tenant.id,
     )
     db_session.add_all([owner_driver, intruder_driver])
     await db_session.flush()
@@ -69,6 +77,7 @@ async def _setup_two_drivers_freight(
         destino={"cidade": "FLORIANÓPOLIS", "estado": "SC"},
         valor_frete=5000.0,
         status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=tenant.id,
     )
     intruder_freight = Freight(
         client_id=client.id,
@@ -77,6 +86,7 @@ async def _setup_two_drivers_freight(
         destino={"cidade": "RIO", "estado": "RJ"},
         valor_frete=3000.0,
         status=FreightStatus.EM_TRANSPORTE,
+        tenant_id=tenant.id,
     )
     db_session.add_all([owner_freight, intruder_freight])
     await db_session.commit()
@@ -86,7 +96,7 @@ async def _setup_two_drivers_freight(
 
 
 def _headers(user: User) -> dict[str, str]:
-    token = create_access_token(user.id, user.role)
+    token = create_access_token(user.id, user.role, tenant_id=user.tenant_id)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -94,8 +104,9 @@ def _headers(user: User) -> dict[str, str]:
 async def test_motorista_cannot_get_other_freight(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, _, intruder, _ = await _setup_two_drivers_freight(db_session)
+    freight, _, intruder, _ = await _setup_two_drivers_freight(db_session, test_tenant)
 
     response = await client.get(
         f"/api/v1/freights/{freight.id}",
@@ -108,8 +119,9 @@ async def test_motorista_cannot_get_other_freight(
 async def test_motorista_cannot_get_other_freight_timeline(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, _, intruder, _ = await _setup_two_drivers_freight(db_session)
+    freight, _, intruder, _ = await _setup_two_drivers_freight(db_session, test_tenant)
 
     response = await client.get(
         f"/api/v1/tracking/{freight.id}/timeline",
@@ -140,8 +152,9 @@ async def test_motorista_cannot_list_drivers(
 async def test_motorista_list_freights_only_own(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    owner_freight, _, intruder, intruder_driver = await _setup_two_drivers_freight(db_session)
+    owner_freight, _, intruder, intruder_driver = await _setup_two_drivers_freight(db_session, test_tenant)
 
     response = await client.get("/api/v1/freights", headers=_headers(intruder))
     assert response.status_code == 200
@@ -159,11 +172,12 @@ async def test_motorista_list_freights_only_own(
 async def test_motorista_cannot_spoof_driver_id_filter(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    freight, _, intruder, owner_driver = await _setup_two_drivers_freight(db_session)
+    freight, _, intruder, _ = await _setup_two_drivers_freight(db_session, test_tenant)
 
     response = await client.get(
-        f"/api/v1/freights?driver_id={owner_driver.id}",
+        f"/api/v1/freights?driver_id={freight.driver_id}",
         headers=_headers(intruder),
     )
     assert response.status_code == 403

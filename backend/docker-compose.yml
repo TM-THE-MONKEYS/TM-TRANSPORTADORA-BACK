@@ -14,12 +14,17 @@ services:
     env_file:
       - .env
     environment:
-      # Dentro do Docker, Redis não é localhost — é o serviço "redis"
+      # Dentro do Docker, Redis/Postgres não são localhost — são os serviços do compose.
+      # DATABASE_URL fixado no Postgres local: container de dev nunca acessa banco de prod.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/tm_transportadora
+      DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@postgres:5432/tm_transportadora
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - tm_network
@@ -51,6 +56,26 @@ services:
         condition: service_healthy
     networks:
       - tm_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tm_postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tm_transportadora
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - tm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tm_transportadora"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -84,6 +109,7 @@ services:
       - tm_network
 
 volumes:
+  postgres_data:
   redis_data:
   uploads_data:
 

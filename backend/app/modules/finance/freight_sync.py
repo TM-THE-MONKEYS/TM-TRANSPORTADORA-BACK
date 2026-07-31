@@ -15,6 +15,7 @@ from app.modules.fuel.models import FuelRefill
 from app.modules.tolls.models import TollCharge
 from app.modules.notifications.service import freight_code
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType, FreightStatus
+from app.shared.utils.dates import today_sp, to_sp_calendar_date
 
 SOURCE_REVENUE = "freight_revenue:"
 SOURCE_FUEL = "fuel_refill:"
@@ -43,8 +44,7 @@ async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> Fin
     code = freight_code(freight.id)
     vencimento: date | None = None
     if freight.data_entrega_prevista:
-        dt = freight.data_entrega_prevista
-        vencimento = dt.date() if isinstance(dt, datetime) else dt
+        vencimento = to_sp_calendar_date(freight.data_entrega_prevista)
 
     if existing:
         existing.valor = float(freight.valor_frete)
@@ -68,6 +68,20 @@ async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> Fin
     return await FinanceRepository(session, freight.tenant_id).create(entry)
 
 
+async def cancel_freight_revenue(session: AsyncSession, freight: Freight) -> None:
+    """Cancela a receita ao cancelar o frete (receita paga é preservada)."""
+    entry = await _find_by_source(session, f"{SOURCE_REVENUE}{freight.id}")
+    if entry and entry.status != FinanceEntryStatus.PAGO:
+        entry.status = FinanceEntryStatus.CANCELADO
+
+
+async def reactivate_freight_revenue(session: AsyncSession, freight: Freight) -> None:
+    """Reativa a receita cancelada ao reabrir um frete cancelado."""
+    entry = await _find_by_source(session, f"{SOURCE_REVENUE}{freight.id}")
+    if entry and entry.status == FinanceEntryStatus.CANCELADO:
+        entry.status = FinanceEntryStatus.PENDENTE
+
+
 async def create_fuel_expense(
     session: AsyncSession,
     refill: FuelRefill,
@@ -85,7 +99,7 @@ async def create_fuel_expense(
     paid_at = refill.data_abastecimento
     payment_date: date | None = None
     if paid_at:
-        payment_date = paid_at.date() if isinstance(paid_at, datetime) else paid_at
+        payment_date = to_sp_calendar_date(paid_at)
 
     entry = FinanceEntry(
         tipo=FinanceEntryType.DESPESA,
@@ -94,7 +108,7 @@ async def create_fuel_expense(
         valor=float(refill.valor_total),
         freight_id=refill.freight_id,
         status=FinanceEntryStatus.PAGO,
-        data_pagamento=payment_date or date.today(),
+        data_pagamento=payment_date or today_sp(),
         observacoes=source_key,
         tenant_id=refill.tenant_id,
     )
@@ -119,7 +133,7 @@ async def create_toll_expense(
     paid_at = charge.data_pedagio
     payment_date: date | None = None
     if paid_at:
-        payment_date = paid_at.date() if isinstance(paid_at, datetime) else paid_at
+        payment_date = to_sp_calendar_date(paid_at)
 
     entry = FinanceEntry(
         tipo=FinanceEntryType.DESPESA,
@@ -128,7 +142,7 @@ async def create_toll_expense(
         valor=float(charge.valor),
         freight_id=charge.freight_id,
         status=FinanceEntryStatus.PAGO,
-        data_pagamento=payment_date or date.today(),
+        data_pagamento=payment_date or today_sp(),
         observacoes=source_key,
         tenant_id=charge.tenant_id,
     )
@@ -174,7 +188,7 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
         valor=float(cost.valor),
         freight_id=cost.freight_id,
         status=FinanceEntryStatus.PAGO,
-        data_pagamento=date.today(),
+        data_pagamento=today_sp(),
         observacoes=source_key,
         tenant_id=cost.tenant_id,
     )
@@ -209,6 +223,8 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
 
     existing = await find_commission_expense(session, freight.id, freight.tenant_id)
     if existing:
+        if existing.status == FinanceEntryStatus.CANCELADO:
+            existing.status = FinanceEntryStatus.PENDENTE
         return existing
 
     driver = await session.get(Driver, freight.driver_id)
@@ -222,8 +238,7 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
     code = freight_code(freight.id)
     vencimento: date | None = None
     if freight.data_entrega_prevista:
-        dt = freight.data_entrega_prevista
-        vencimento = dt.date() if isinstance(dt, datetime) else dt
+        vencimento = to_sp_calendar_date(freight.data_entrega_prevista)
 
     entry = FinanceEntry(
         tipo=FinanceEntryType.DESPESA,
@@ -236,6 +251,16 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
         tenant_id=freight.tenant_id,
     )
     return await FinanceRepository(session, freight.tenant_id).create(entry)
+
+
+async def cancel_commission_expense(session: AsyncSession, freight: Freight) -> None:
+    """Cancela comissão pendente ao reabrir frete entregue."""
+    existing = await find_commission_expense(session, freight.id, freight.tenant_id)
+    if not existing:
+        return
+    if existing.status == FinanceEntryStatus.PAGO:
+        return
+    existing.status = FinanceEntryStatus.CANCELADO
 
 
 async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) -> dict[str, int]:
