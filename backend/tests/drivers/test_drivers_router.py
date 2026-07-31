@@ -1,6 +1,7 @@
 """Tests for driver endpoints."""
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 
 import pytest
@@ -199,7 +200,7 @@ async def test_delete_driver_preserves_fuel_refill(
 
     freight = Freight(
         client_id=client_row.id,
-        driver_id=driver_id,
+        driver_id=uuid.UUID(driver_id),
         origem={"cidade": "CURITIBA", "estado": "PR", "logradouro": "RUA A"},
         destino={"cidade": "FLORIANÓPOLIS", "estado": "SC", "logradouro": "RUA B"},
         valor_frete=5000.0,

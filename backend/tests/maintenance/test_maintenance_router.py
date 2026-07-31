@@ -8,16 +8,18 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.tenants.models import Tenant
 from app.modules.trucks.models import Truck
 
 
-async def _create_truck(db_session: AsyncSession) -> Truck:
+async def _create_truck(db_session: AsyncSession, tenant: Tenant) -> Truck:
     truck = Truck(
         placa=f"MNT{uuid.uuid4().hex[:4].upper()}",
         modelo="FH 460",
         marca="Volvo",
         ano=2021,
         capacidade_kg=20000.0,
+        tenant_id=tenant.id,
     )
     db_session.add(truck)
     await db_session.commit()
@@ -31,8 +33,9 @@ async def test_create_maintenance(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    truck = await _create_truck(db_session)
+    truck = await _create_truck(db_session, test_tenant)
     response = await client.post(
         "/api/v1/maintenance",
         json={
@@ -66,8 +69,9 @@ async def test_maintenance_alerts(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    truck = await _create_truck(db_session)
+    truck = await _create_truck(db_session, test_tenant)
     await client.post(
         "/api/v1/maintenance",
         json={
@@ -105,8 +109,9 @@ async def test_update_maintenance_status(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    truck = await _create_truck(db_session)
+    truck = await _create_truck(db_session, test_tenant)
     create_resp = await client.post(
         "/api/v1/maintenance",
         json={
@@ -134,8 +139,9 @@ async def test_delete_maintenance(
     operador_headers: dict[str, str],
     operador_user: object,
     db_session: AsyncSession,
+    test_tenant: Tenant,
 ) -> None:
-    truck = await _create_truck(db_session)
+    truck = await _create_truck(db_session, test_tenant)
     create_resp = await client.post(
         "/api/v1/maintenance",
         json={

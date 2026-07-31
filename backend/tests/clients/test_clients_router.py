@@ -23,7 +23,7 @@ async def test_create_client_with_valid_cpf(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["nome"] == "Cliente Teste"
+    assert data["nome"] == "CLIENTE TESTE"
     assert data["cpf_cnpj"] == "52998224725"
 
 

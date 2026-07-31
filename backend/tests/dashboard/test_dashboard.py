@@ -27,7 +27,7 @@ async def test_dashboard_requires_auth(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_dashboard_motorista_forbidden(
-    client: AsyncClient, db_session: object
+    client: AsyncClient, db_session: object, test_tenant: object
 ) -> None:
     import uuid
 
@@ -43,12 +43,13 @@ async def test_dashboard_motorista_forbidden(
         hashed_password=hash_password("Motor@123!"),
         role=UserRole.MOTORISTA,
         is_active=True,
+        tenant_id=test_tenant.id,  # type: ignore[attr-defined]
     )
     session.add(motorista)  # type: ignore[union-attr]
     await session.commit()  # type: ignore[union-attr]
     await session.refresh(motorista)  # type: ignore[union-attr]
 
-    token = create_access_token(motorista.id, motorista.role)
+    token = create_access_token(motorista.id, motorista.role, tenant_id=motorista.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
     response = await client.get("/api/v1/dashboard/kpis", headers=headers)
     assert response.status_code == 403

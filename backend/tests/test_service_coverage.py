@@ -105,6 +105,7 @@ async def test_delete_user_as_admin(
         hashed_password=hash_password("Del@123!"),
         role=UserRole.OPERADOR,
         is_active=True,
+        tenant_id=admin_user.tenant_id,
     )
     db_session.add(target)
     await db_session.commit()
@@ -186,6 +187,7 @@ async def test_list_freights_with_filter(
 async def test_finance_entry_update_and_delete(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: object,
 ) -> None:
     from app.core.security.jwt import create_access_token
     from app.core.security.password import hash_password
@@ -197,11 +199,12 @@ async def test_finance_entry_update_and_delete(
         hashed_password=hash_password("Fin@123!"),
         role=UserRole.FINANCEIRO,
         is_active=True,
+        tenant_id=test_tenant.id,  # type: ignore[attr-defined]
     )
     db_session.add(fin_user)
     await db_session.commit()
     await db_session.refresh(fin_user)
-    token = create_access_token(fin_user.id, fin_user.role)
+    token = create_access_token(fin_user.id, fin_user.role, tenant_id=fin_user.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     create_resp = await client.post(
@@ -233,6 +236,7 @@ async def test_finance_entry_update_and_delete(
 async def test_list_finance_with_filter(
     client: AsyncClient,
     db_session: AsyncSession,
+    test_tenant: object,
 ) -> None:
     from app.core.security.jwt import create_access_token
     from app.core.security.password import hash_password
@@ -244,11 +248,12 @@ async def test_list_finance_with_filter(
         hashed_password=hash_password("Fin@123!"),
         role=UserRole.FINANCEIRO,
         is_active=True,
+        tenant_id=test_tenant.id,  # type: ignore[attr-defined]
     )
     db_session.add(fin_user)
     await db_session.commit()
     await db_session.refresh(fin_user)
-    token = create_access_token(fin_user.id, fin_user.role)
+    token = create_access_token(fin_user.id, fin_user.role, tenant_id=fin_user.tenant_id)
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get(

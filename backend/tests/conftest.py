@@ -27,12 +27,22 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 @pytest_asyncio.fixture(scope="session")
 async def engine() -> AsyncGenerator[Any, None]:
+    from sqlalchemy import event
+
     eng = create_async_engine(
         TEST_DATABASE_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
         echo=False,
     )
+
+    # SQLite não aplica ON DELETE SET NULL/CASCADE sem este pragma — paridade com Postgres.
+    @event.listens_for(eng.sync_engine, "connect")
+    def _enable_sqlite_fks(dbapi_conn: Any, _record: Any) -> None:
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     yield eng
     await eng.dispose()
 

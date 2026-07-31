@@ -102,4 +102,4 @@ async def test_update_own_profile(
         headers=admin_headers,
     )
     assert response.status_code == 200
-    assert response.json()["nome"] == "Admin Atualizado"
+    assert response.json()["nome"] == "ADMIN ATUALIZADO"
