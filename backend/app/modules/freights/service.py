@@ -11,7 +11,7 @@ from app.modules.freights.models import Freight, FreightCost, FreightStop
 from app.modules.freights.repository import FreightRepository
 from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightStopCreate, FreightUpdate
 from app.modules.users.models import User
-from app.shared.enums import FreightStatus, UserRole
+from app.shared.enums import FreightStatus, TruckStatus, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
@@ -21,19 +21,49 @@ from app.shared.security.resource_access import (
 
 log = structlog.get_logger(__name__)
 
-# Fluxo simplificado: em_transporte → entregue, cancelado a partir de qualquer status.
-# Status legados (orcamento/confirmado/em_coleta) existem só em dados antigos — aceitos
-# como estado atual, mas nenhum frete pode voltar para eles.
+# Fluxo estrito: em_transporte → entregue|cancelado.
+# Status legados (orcamento/confirmado/em_coleta) só como origem → em_transporte|cancelado.
+# Admin pode reabrir entregue/cancelado → em_transporte.
 _LEGACY_STATUSES: frozenset[FreightStatus] = frozenset(
     {FreightStatus.ORCAMENTO, FreightStatus.CONFIRMADO, FreightStatus.EM_COLETA}
 )
+_TERMINAL_STATUSES: frozenset[FreightStatus] = frozenset(
+    {FreightStatus.ENTREGUE, FreightStatus.CANCELADO}
+)
+_ALLOWED_TRANSITIONS: dict[FreightStatus, frozenset[FreightStatus]] = {
+    FreightStatus.ORCAMENTO: frozenset({FreightStatus.EM_TRANSPORTE, FreightStatus.CANCELADO}),
+    FreightStatus.CONFIRMADO: frozenset({FreightStatus.EM_TRANSPORTE, FreightStatus.CANCELADO}),
+    FreightStatus.EM_COLETA: frozenset({FreightStatus.EM_TRANSPORTE, FreightStatus.CANCELADO}),
+    FreightStatus.EM_TRANSPORTE: frozenset({FreightStatus.ENTREGUE, FreightStatus.CANCELADO}),
+    FreightStatus.ENTREGUE: frozenset(),
+    FreightStatus.CANCELADO: frozenset(),
+}
+
+# Status que deixam o caminhão "em viagem" (espelha front IN_TRANSIT_FREIGHT_STATUSES).
+_TRUCK_BUSY_STATUSES: frozenset[FreightStatus] = frozenset(
+    {FreightStatus.EM_COLETA, FreightStatus.EM_TRANSPORTE}
+)
+
+# Não sobrescrever manutenção/inativo — sync só mexe em disponivel ↔ em_viagem.
+_TRUCK_LOCKED_STATUSES: frozenset[TruckStatus] = frozenset(
+    {TruckStatus.EM_MANUTENCAO, TruckStatus.INATIVO}
+)
 
 
-def _is_valid_status_transition(current: FreightStatus, target: FreightStatus) -> bool:
-    """Qualquer transição entre em_transporte/entregue/cancelado; legado só como origem."""
+def _is_valid_status_transition(
+    current: FreightStatus,
+    target: FreightStatus,
+    *,
+    is_admin: bool = False,
+) -> bool:
+    """Valida transição. Admin pode reabrir terminal → em_transporte."""
     if current == target:
         return True
-    return target not in _LEGACY_STATUSES
+    if target in _LEGACY_STATUSES:
+        return False
+    if is_admin and current in _TERMINAL_STATUSES and target == FreightStatus.EM_TRANSPORTE:
+        return True
+    return target in _ALLOWED_TRANSITIONS.get(current, frozenset())
 
 
 class FreightService:
@@ -45,6 +75,34 @@ class FreightService:
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):
             raise ForbiddenException("Acesso negado")
+
+    async def _sync_truck_status(self, truck_id: uuid.UUID | None) -> None:
+        """Atualiza disponivel ↔ em_viagem conforme fretes ativos do caminhão.
+
+        Fonte de verdade no backend — o front só revalida cache. Não sobrescreve
+        em_manutencao / inativo.
+        """
+        if not truck_id:
+            return
+        from app.modules.trucks.models import Truck
+
+        truck = await self._session.get(Truck, truck_id)
+        if not truck or truck.tenant_id != self._tenant_id or truck.deleted_at is not None:
+            return
+        if truck.status in _TRUCK_LOCKED_STATUSES:
+            return
+
+        on_trip = await self._repo.has_active_freight_for_truck(truck_id)
+        next_status = TruckStatus.EM_VIAGEM if on_trip else TruckStatus.DISPONIVEL
+        if truck.status != next_status:
+            truck.status = next_status
+            await self._session.flush()
+            log.info(
+                "truck_status_synced",
+                truck_id=str(truck_id),
+                new_status=next_status.value,
+                on_trip=on_trip,
+            )
 
     async def create(self, data: FreightCreate, created_by: User) -> Freight:
         self._check_write_access(created_by)
@@ -69,6 +127,8 @@ class FreightService:
             )
             await create_cost_expense(self._session, cost)
         await ensure_freight_revenue(self._session, freight)
+        if freight.truck_id and freight.status in _TRUCK_BUSY_STATUSES:
+            await self._sync_truck_status(freight.truck_id)
         freight_id = freight.id
         await self._session.commit()
         self._session.expire(freight)
@@ -114,15 +174,18 @@ class FreightService:
 
     async def update(self, freight_id: uuid.UUID, data: FreightUpdate, updated_by: User) -> Freight:
         self._check_write_access(updated_by)
-        freight = await self._repo.get_by_id(freight_id)
+        status_changing = data.status is not None
+        freight = await self._repo.get_by_id(freight_id, for_update=status_changing)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        is_admin = updated_by.role == UserRole.ADMIN
         if data.status and data.status != freight.status:
-            if not _is_valid_status_transition(freight.status, data.status):
+            if not _is_valid_status_transition(freight.status, data.status, is_admin=is_admin):
                 raise ForbiddenException(
                     f"Transição inválida: {freight.status.value} → {data.status.value}"
                 )
         old_status = freight.status
+        old_truck_id = freight.truck_id
         updated_fields = data.model_dump(exclude_none=True)
         for field, value in updated_fields.items():
             setattr(freight, field, value)
@@ -133,6 +196,11 @@ class FreightService:
             await ensure_freight_revenue(self._session, freight)
         if data.status and data.status != old_status:
             await self._on_status_changed(freight, old_status, data.status)
+        # Sync frota: caminhão antigo (se trocou) + atual após mudança de status/truck.
+        if "truck_id" in updated_fields or (data.status and data.status != old_status):
+            if old_truck_id and old_truck_id != freight.truck_id:
+                await self._sync_truck_status(old_truck_id)
+            await self._sync_truck_status(freight.truck_id)
         await self._session.commit()
         if data.status or data.model_dump(exclude_none=True):
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
@@ -154,7 +222,9 @@ class FreightService:
             )
         removed_entries = await self._soft_delete_linked_finance_entries(freight_id)
         cascade_counts = await self._hard_delete_linked_operational_records(freight_id)
+        truck_id = freight.truck_id
         await self._repo.soft_delete(freight)
+        await self._sync_truck_status(truck_id)
         await self._session.commit()
         log.info(
             "freight_deleted",
@@ -257,7 +327,7 @@ class FreightService:
 
     async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         self._check_write_access(requesting_user)
-        freight = await self._repo.get_by_id(freight_id)
+        freight = await self._repo.get_by_id(freight_id, for_update=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
         if freight.status in _LEGACY_STATUSES:
@@ -266,38 +336,87 @@ class FreightService:
             next_status = FreightStatus.ENTREGUE
         else:
             raise ForbiddenException("Frete já está no status final")
-        old_status = freight.status
-        freight.status = next_status
-        freight = await self._repo.update(freight)
-        await self._on_status_changed(freight, old_status, next_status)
-        await self._session.commit()
-        freight = await self._repo.get_by_id(freight_id, with_relations=True)
-        assert freight is not None
-        log.info("freight_status_advanced", freight_id=str(freight_id), new_status=next_status.value)
-        return freight
+        return await self._apply_status_change(freight, next_status, commit=True)
 
     async def update_status(
         self, freight_id: uuid.UUID, new_status: FreightStatus, requesting_user: User
     ) -> Freight:
         self._check_write_access(requesting_user)
-        freight = await self._repo.get_by_id(freight_id)
+        freight = await self._repo.get_by_id(freight_id, for_update=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        is_admin = requesting_user.role == UserRole.ADMIN
         if new_status != freight.status and not _is_valid_status_transition(
-            freight.status, new_status
+            freight.status, new_status, is_admin=is_admin
         ):
             raise ForbiddenException(
                 f"Transição inválida: {freight.status.value} → {new_status.value}"
             )
+        if new_status == freight.status:
+            freight = await self._repo.get_by_id(freight_id, with_relations=True)
+            assert freight is not None
+            return freight
+        return await self._apply_status_change(freight, new_status, commit=True)
+
+    async def mark_delivered_from_tracking(
+        self, freight_id: uuid.UUID, *, commit: bool = False
+    ) -> Freight | None:
+        """Avança frete para entregue quando tracking registra entrega.
+
+        Não exige papel de escrita no frete — quem já pode lançar tracking
+        (admin/operador/motorista) dispara a conclusão. Idempotente se já entregue.
+        Não reabre cancelado.
+        """
+        freight = await self._repo.get_by_id(freight_id, for_update=True)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        if freight.status == FreightStatus.ENTREGUE:
+            return freight
+        if freight.status == FreightStatus.CANCELADO:
+            raise BadRequestException(
+                "Não é possível marcar entrega em frete cancelado"
+            )
+        if not _is_valid_status_transition(
+            freight.status, FreightStatus.ENTREGUE, is_admin=False
+        ):
+            # Legado → primeiro normaliza para em_transporte, depois entrega no mesmo flush.
+            if freight.status in _LEGACY_STATUSES:
+                old = freight.status
+                freight.status = FreightStatus.EM_TRANSPORTE
+                freight = await self._repo.update(freight)
+                await self._on_status_changed(freight, old, FreightStatus.EM_TRANSPORTE)
+            else:
+                raise ForbiddenException(
+                    f"Transição inválida: {freight.status.value} → entregue"
+                )
+        return await self._apply_status_change(
+            freight, FreightStatus.ENTREGUE, commit=commit
+        )
+
+    async def _apply_status_change(
+        self,
+        freight: Freight,
+        new_status: FreightStatus,
+        *,
+        commit: bool,
+    ) -> Freight:
+        freight_id = freight.id
         old_status = freight.status
         freight.status = new_status
         freight = await self._repo.update(freight)
         if new_status != old_status:
             await self._on_status_changed(freight, old_status, new_status)
-        await self._session.commit()
-        freight = await self._repo.get_by_id(freight_id, with_relations=True)
-        assert freight is not None
-        log.info("freight_status_updated", freight_id=str(freight_id), new_status=new_status.value)
+            await self._sync_truck_status(freight.truck_id)
+        if commit:
+            await self._session.commit()
+            freight = await self._repo.get_by_id(freight_id, with_relations=True)
+            assert freight is not None
+        log.info(
+            "freight_status_updated",
+            freight_id=str(freight_id),
+            old_status=old_status.value,
+            new_status=new_status.value,
+        )
         return freight
 
     async def _on_status_changed(

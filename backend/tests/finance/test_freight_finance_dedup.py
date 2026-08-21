@@ -94,7 +94,7 @@ async def test_manual_pedagio_creates_single_finance_entry(
             )
         )
     ).scalars().all()
-    pedagio = [e for e in entries if e.observacoes == f"{SOURCE_COST}{cost_id}"]
+    pedagio = [e for e in entries if e.source_key == f"{SOURCE_COST}{cost_id}"]
     assert len(pedagio) == 1
     assert pedagio[0].valor == 85.5
     assert pedagio[0].categoria == "Pedágio"
@@ -219,7 +219,7 @@ async def test_fuel_delete_soft_deletes_finance_mirror(
     mirror = (
         await db_session.execute(
             select(FinanceEntry).where(
-                FinanceEntry.observacoes == f"{SOURCE_FUEL}{refill_id}",
+                FinanceEntry.source_key == f"{SOURCE_FUEL}{refill_id}",
                 FinanceEntry.deleted_at.is_(None),
             )
         )
@@ -233,7 +233,7 @@ async def test_fuel_delete_soft_deletes_finance_mirror(
     gone = (
         await db_session.execute(
             select(FinanceEntry).where(
-                FinanceEntry.observacoes == f"{SOURCE_FUEL}{refill_id}",
+                FinanceEntry.source_key == f"{SOURCE_FUEL}{refill_id}",
                 FinanceEntry.deleted_at.is_(None),
             )
         )

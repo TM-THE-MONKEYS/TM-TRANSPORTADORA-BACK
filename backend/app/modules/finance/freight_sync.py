@@ -41,13 +41,26 @@ def is_toll_cost_tipo(tipo: str | None) -> bool:
 
 
 async def _find_by_source(session: AsyncSession, source_key: str) -> FinanceEntry | None:
+    """Busca espelho por source_key; fallback em observacoes (dados pré-migration)."""
+    result = await session.execute(
+        select(FinanceEntry).where(
+            FinanceEntry.deleted_at.is_(None),
+            FinanceEntry.source_key == source_key,
+        )
+    )
+    found = result.scalar_one_or_none()
+    if found:
+        return found
     result = await session.execute(
         select(FinanceEntry).where(
             FinanceEntry.deleted_at.is_(None),
             FinanceEntry.observacoes == source_key,
         )
     )
-    return result.scalar_one_or_none()
+    legacy = result.scalar_one_or_none()
+    if legacy and not legacy.source_key:
+        legacy.source_key = source_key
+    return legacy
 
 
 async def soft_delete_by_source(session: AsyncSession, source_key: str) -> None:
@@ -85,7 +98,7 @@ async def ensure_freight_revenue(session: AsyncSession, freight: Freight) -> Fin
         freight_id=freight.id,
         data_vencimento=vencimento,
         status=FinanceEntryStatus.PENDENTE,
-        observacoes=source_key,
+        source_key=source_key,
         tenant_id=freight.tenant_id,
     )
     return await FinanceRepository(session, freight.tenant_id).create(entry)
@@ -132,7 +145,7 @@ async def create_fuel_expense(
         freight_id=refill.freight_id,
         status=FinanceEntryStatus.PAGO,
         data_pagamento=payment_date or today_sp(),
-        observacoes=source_key,
+        source_key=source_key,
         tenant_id=refill.tenant_id,
     )
     return await FinanceRepository(session, refill.tenant_id).create(entry)
@@ -166,7 +179,7 @@ async def create_toll_expense(
         freight_id=charge.freight_id,
         status=FinanceEntryStatus.PAGO,
         data_pagamento=payment_date or today_sp(),
-        observacoes=source_key,
+        source_key=source_key,
         tenant_id=charge.tenant_id,
     )
     return await FinanceRepository(session, charge.tenant_id).create(entry)
@@ -220,7 +233,7 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
         freight_id=cost.freight_id,
         status=FinanceEntryStatus.PAGO,
         data_pagamento=today_sp(),
-        observacoes=source_key,
+        source_key=source_key,
         tenant_id=cost.tenant_id,
     )
     return await FinanceRepository(session, cost.tenant_id).create(entry)
@@ -260,8 +273,8 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
     if existing:
         if existing.status == FinanceEntryStatus.CANCELADO:
             existing.status = FinanceEntryStatus.PENDENTE
-        if not existing.observacoes:
-            existing.observacoes = f"{SOURCE_COMMISSION}{freight.id}"
+        if not existing.source_key:
+            existing.source_key = f"{SOURCE_COMMISSION}{freight.id}"
         return existing
 
     driver = await session.get(Driver, freight.driver_id)
@@ -277,6 +290,7 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
     if freight.data_entrega_prevista:
         vencimento = to_sp_calendar_date(freight.data_entrega_prevista)
 
+    commission_key = f"{SOURCE_COMMISSION}{freight.id}"
     entry = FinanceEntry(
         tipo=FinanceEntryType.DESPESA,
         categoria=COMMISSION_CATEGORY,
@@ -285,7 +299,7 @@ async def create_commission_expense(session: AsyncSession, freight: Freight) -> 
         freight_id=freight.id,
         data_vencimento=vencimento,
         status=FinanceEntryStatus.PENDENTE,
-        observacoes=f"{SOURCE_COMMISSION}{freight.id}",
+        source_key=commission_key,
         tenant_id=freight.tenant_id,
     )
     return await FinanceRepository(session, freight.tenant_id).create(entry)

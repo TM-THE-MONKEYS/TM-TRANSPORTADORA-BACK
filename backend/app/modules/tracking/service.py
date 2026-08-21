@@ -27,7 +27,7 @@ from app.modules.tracking.schemas import (
 )
 from app.modules.trucks.models import Truck
 from app.modules.users.models import User
-from app.shared.enums import TRACKING_STATUS_LABELS, UserRole
+from app.shared.enums import TRACKING_STATUS_LABELS, TrackingStatus, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
 from app.shared.security.resource_access import assert_freight_read_access
 
@@ -92,12 +92,22 @@ class TrackingService:
             tracking, added_by
         )
 
+        # Tracking "entregue" conclui o frete (financeiro/comissão/frota no mesmo commit).
+        if data.status == TrackingStatus.ENTREGUE:
+            from app.modules.freights.service import FreightService
+
+            freight_service = FreightService(self._session, self._tenant_id)
+            await freight_service.mark_delivered_from_tracking(
+                data.freight_id, commit=False
+            )
+
         await self._session.commit()
         log.info(
             "tracking_update_added",
             freight_id=str(data.freight_id),
             status=data.status.value,
             notification_id=str(notification.id),
+            freight_advanced=data.status == TrackingStatus.ENTREGUE,
         )
         base = self._to_update_read(tracking)
         return TrackingUpdateCreatedResponse(

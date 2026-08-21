@@ -6,12 +6,11 @@ from typing import Annotated
 import structlog
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.database import get_db
-from app.core.security.jwt import decode_access_token
+from app.core.security.jwt import JWTError, decode_access_token
 from app.modules.users.models import User
 from app.shared.enums import UserRole
 from app.shared.exceptions.custom import ForbiddenException, UnauthorizedException
