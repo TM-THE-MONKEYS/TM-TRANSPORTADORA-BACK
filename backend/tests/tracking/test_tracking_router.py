@@ -113,3 +113,32 @@ async def test_get_empty_timeline(
     data = response.json()
     assert data["updates"] == []
     assert data["current_status"] is None
+
+
+@pytest.mark.asyncio
+async def test_tracking_entregue_advances_freight_status(
+    client: AsyncClient,
+    operador_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    freight = await _create_freight(db_session, test_tenant)
+    freight_id = freight.id
+
+    response = await client.post(
+        "/api/v1/tracking",
+        json={
+            "freight_id": str(freight_id),
+            "status": "entregue",
+            "descricao": "Entrega concluída no destino",
+            "cidade": "Rio de Janeiro",
+            "estado": "RJ",
+        },
+        headers=operador_headers,
+    )
+    assert response.status_code == 201, response.text
+
+    db_session.expire_all()
+    refreshed = await db_session.get(Freight, freight_id)
+    assert refreshed is not None
+    assert refreshed.status == FreightStatus.ENTREGUE

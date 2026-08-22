@@ -244,7 +244,7 @@ class AuthService:
     async def reset_password(self, token: str, new_password: str) -> None:
         from uuid import UUID
 
-        from jose import JWTError
+        from app.core.security.jwt import JWTError, decode_password_reset_token
         from sqlalchemy import select
         try:
             user_id_str = decode_password_reset_token(token)

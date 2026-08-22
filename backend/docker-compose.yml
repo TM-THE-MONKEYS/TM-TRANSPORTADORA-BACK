@@ -14,7 +14,7 @@ services:
     env_file:
       - .env
     environment:
-      # Dentro do Docker, Redis/Postgres n√£o s√£o localhost ‚Äî s√£o os servi√ßos do compose.
+      # Dentro do Docker, Redis/Postgres n„o s„o localhost  s„o os serviÁos do compose.
       # DATABASE_URL fixado no Postgres local: container de dev nunca acessa banco de prod.
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/tm_transportadora
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@postgres:5432/tm_transportadora
@@ -48,11 +48,16 @@ services:
     env_file:
       - .env
     environment:
+      # Worker usa sempre o Postgres local do compose  nunca o Supabase de prod.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/tm_transportadora
+      DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@postgres:5432/tm_transportadora
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - tm_network

@@ -32,6 +32,9 @@ class FinanceEntry(TenantMixin, SoftDeleteMixin, BaseModel):
         default=FinanceEntryStatus.PENDENTE,
         index=True,
     )
+    # Chave idempotente de espelho (freight_revenue:uuid, commission:uuid, …).
+    # Substitui o uso de observacoes como source key.
+    source_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

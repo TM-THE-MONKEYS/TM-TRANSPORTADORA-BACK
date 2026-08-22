@@ -22,8 +22,16 @@ class FreightRepository(TenantBaseRepository[Freight]):
     def __init__(self, session: AsyncSession, tenant_id: uuid.UUID) -> None:
         super().__init__(session, tenant_id)
 
-    async def get_by_id(self, freight_id: uuid.UUID, with_relations: bool = False) -> Freight | None:
+    async def get_by_id(
+        self,
+        freight_id: uuid.UUID,
+        with_relations: bool = False,
+        *,
+        for_update: bool = False,
+    ) -> Freight | None:
         query = self._base_query().where(Freight.id == freight_id)
+        if for_update:
+            query = query.with_for_update()
         if with_relations:
             query = query.options(
                 selectinload(Freight.costs),
@@ -97,6 +105,20 @@ class FreightRepository(TenantBaseRepository[Freight]):
             .group_by(Freight.status)
         )
         return {row[0].value: row[1] for row in result.all()}
+
+    async def has_active_freight_for_truck(
+        self,
+        truck_id: uuid.UUID,
+        exclude_freight_id: uuid.UUID | None = None,
+    ) -> bool:
+        """True if truck has a non-deleted freight in coleta/transporte (em viagem)."""
+        query = self._base_query().where(
+            Freight.truck_id == truck_id,
+            Freight.status.in_((FreightStatus.EM_COLETA, FreightStatus.EM_TRANSPORTE)),
+        )
+        if exclude_freight_id:
+            query = query.where(Freight.id != exclude_freight_id)
+        return await self._count(query) > 0
 
     async def revenue_sum(self, status: FreightStatus | None = None) -> float:
         query = select(func.sum(Freight.valor_frete)).where(

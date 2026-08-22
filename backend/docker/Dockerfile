@@ -32,9 +32,11 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 FROM base AS production
 COPY . .
 
+# Volume Railway deve montar em /data/uploads (UPLOAD_DIR padrão em produção).
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
-    && mkdir -p /app/uploads \
-    && chown -R appuser:appgroup /app/uploads
+    && mkdir -p /data/uploads /app/uploads \
+    && chown -R appuser:appgroup /data /app/uploads
+ENV UPLOAD_DIR=/data/uploads
 USER appuser
 
 EXPOSE 8000

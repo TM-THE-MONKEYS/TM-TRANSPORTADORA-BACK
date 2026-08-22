@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
 
     # Uploads (documentos motorista, etc.)
+    # Em produção no Railway: montar volume persistente em /data/uploads e
+    # definir UPLOAD_DIR=/data/uploads (evita perda no redeploy).
     upload_dir: str = "uploads"
     upload_max_bytes: int = 5 * 1024 * 1024
 
@@ -106,6 +108,9 @@ class Settings(BaseSettings):
                     "ALLOW_TENANT_REGISTRATION must be "
                     "false in production"
                 )
+            # Path relativo sob /app some no redeploy sem volume — força absoluto.
+            if self.upload_dir in ("uploads", "./uploads"):
+                object.__setattr__(self, "upload_dir", "/data/uploads")
         return self
 
     @property

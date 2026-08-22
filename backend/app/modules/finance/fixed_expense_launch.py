@@ -46,11 +46,24 @@ async def find_launch_for_month(
     result = await session.execute(
         select(FinanceEntry).where(
             FinanceEntry.deleted_at.is_(None),
+            FinanceEntry.source_key == month_key,
+        )
+    )
+    entry = result.scalar_one_or_none()
+    if entry:
+        return entry
+
+    # Legacy: source em observacoes
+    result = await session.execute(
+        select(FinanceEntry).where(
+            FinanceEntry.deleted_at.is_(None),
             FinanceEntry.observacoes == month_key,
         )
     )
     entry = result.scalar_one_or_none()
     if entry:
+        if not entry.source_key:
+            entry.source_key = month_key
         return entry
 
     first, last = month_bounds(year, month)
@@ -63,7 +76,10 @@ async def find_launch_for_month(
             FinanceEntry.data_vencimento <= last,
         )
     )
-    return result.scalar_one_or_none()
+    legacy = result.scalar_one_or_none()
+    if legacy and not legacy.source_key:
+        legacy.source_key = month_key
+    return legacy
 
 
 async def launch_fixed_expense_for_month(
@@ -93,7 +109,7 @@ async def launch_fixed_expense_for_month(
         valor=float(expense.valor),
         status=FinanceEntryStatus.PENDENTE,
         data_vencimento=vencimento,
-        observacoes=month_key,
+        source_key=month_key,
         tenant_id=expense.tenant_id,
     )
     entry = await FinanceRepository(session, expense.tenant_id).create(entry)

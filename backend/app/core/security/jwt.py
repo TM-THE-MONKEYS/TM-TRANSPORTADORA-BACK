@@ -1,4 +1,4 @@
-"""JWT token creation and validation."""
+"""JWT token creation and validation (PyJWT)."""
 from __future__ import annotations
 
 import hashlib
@@ -6,12 +6,23 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError as JWTError
 
 from app.core.config.settings import get_settings
 from app.shared.enums import UserRole
 
 settings = get_settings()
+
+__all__ = [
+    "JWTError",
+    "create_access_token",
+    "create_refresh_token",
+    "hash_refresh_token",
+    "decode_access_token",
+    "create_password_reset_token",
+    "decode_password_reset_token",
+]
 
 
 def create_access_token(
@@ -52,15 +63,18 @@ def hash_refresh_token(raw_token: str) -> str:
 
 def decode_access_token(token: str) -> dict[str, object]:
     """Decode and validate JWT. Raises JWTError on failure."""
-    payload = jwt.decode(
-        token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": True},
-    )
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"require": ["exp", "sub", "type"]},
+        )
+    except JWTError:
+        raise
     if payload.get("type") != "access":
         raise JWTError("Invalid token type")
-    return payload
+    return payload  # type: ignore[return-value]
 
 
 def create_password_reset_token(user_id: UUID) -> str:
@@ -77,12 +91,15 @@ def create_password_reset_token(user_id: UUID) -> str:
 
 def decode_password_reset_token(token: str) -> str:
     """Return user_id string. Raises JWTError on failure."""
-    payload = jwt.decode(
-        token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": True},
-    )
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"require": ["exp", "sub", "type"]},
+        )
+    except JWTError:
+        raise
     if payload.get("type") != "password_reset":
         raise JWTError("Invalid token type")
     sub = payload.get("sub")

@@ -51,7 +51,7 @@ class DashboardKPIsFrontend(BaseModel):
     monthly_revenue_brl: float
     operational_costs_brl: float
     maintenance_alerts: int
-    financial_pending: int
+    financial_pending: float
 
     @classmethod
     def from_detailed(cls, kpis: DashboardKPIs) -> "DashboardKPIsFrontend":
@@ -66,7 +66,7 @@ class DashboardKPIsFrontend(BaseModel):
             monthly_revenue_brl=kpis.finance.receita_total,
             operational_costs_brl=kpis.finance.despesa_total,
             maintenance_alerts=kpis.upcoming_maintenance_alerts,
-            financial_pending=int(
+            financial_pending=(
                 kpis.finance.receitas_pendentes + kpis.finance.despesas_pendentes
             ),
         )

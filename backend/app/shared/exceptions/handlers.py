@@ -8,10 +8,10 @@ import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from jose import JWTError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.config.settings import get_settings
+from app.core.security.jwt import JWTError
 from app.shared.exceptions.custom import AppException
 
 log = structlog.get_logger()

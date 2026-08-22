@@ -64,7 +64,7 @@ API RESTful assíncrona para gerenciamento completo de transportadora: frota, mo
 | Banco de Dados | PostgreSQL via Supabase |
 | Migrations | Alembic (async mode) |
 | Validação | Pydantic v2 |
-| Autenticação | JWT (python-jose) + Argon2 (passlib) |
+| Autenticação | JWT (PyJWT) + Argon2 (passlib) |
 | Cache/Fila | Redis + Celery |
 | Logs | Structlog (JSON estruturado) |
 | Rate Limiting | SlowAPI |
