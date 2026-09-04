@@ -33,10 +33,14 @@ async def list_maintenance(
     truck_id: uuid.UUID | None = Query(default=None),
     status: MaintenanceStatus | None = Query(default=None),
     tipo: MaintenanceType | None = Query(default=None),
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[MaintenanceListResponse]:
     service = MaintenanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
-    return await service.list(params, current_user, truck_id, status, tipo)  # type: ignore[return-value]
+    return await service.list(  # type: ignore[return-value]
+        params, current_user, truck_id, status, tipo, competencia_mes, competencia_ano
+    )
 
 
 @router.get("/alerts", response_model=list[MaintenanceRead])

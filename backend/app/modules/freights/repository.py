@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import func, select
@@ -10,7 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.modules.freights.models import Freight, FreightAttachment, FreightCost, FreightStop
 from app.shared.base_repository import TenantBaseRepository
-from app.shared.enums import FreightStatus
+from app.shared.enums import FinanceEntryStatus, FinanceEntryType, FreightStatus
+from app.shared.filters.competencia import freight_competencia_filter_clause
 from app.shared.pagination import PageParams
 
 log = structlog.get_logger(__name__)
@@ -48,6 +50,8 @@ class FreightRepository(TenantBaseRepository[Freight]):
         client_id: uuid.UUID | None = None,
         driver_id: uuid.UUID | None = None,
         truck_id: uuid.UUID | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> tuple[list[Freight], int]:
         query = self._base_query()
         if status:
@@ -58,6 +62,8 @@ class FreightRepository(TenantBaseRepository[Freight]):
             query = query.where(Freight.driver_id == driver_id)
         if truck_id:
             query = query.where(Freight.truck_id == truck_id)
+        if competencia_mes and competencia_ano:
+            query = query.where(freight_competencia_filter_clause(competencia_ano, competencia_mes))
         total = await self._count(query)
         result = await self._session.execute(
             query.options(selectinload(Freight.stops))
@@ -66,6 +72,73 @@ class FreightRepository(TenantBaseRepository[Freight]):
             .limit(params.limit)
         )
         return list(result.scalars().all()), total
+
+    async def get_summary(
+        self,
+        status: FreightStatus | None = None,
+        driver_id: uuid.UUID | None = None,
+        truck_id: uuid.UUID | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> dict[str, float | int]:
+        """Resumo agregado para cards de Fretes / Frota / Motoristas."""
+        from app.modules.finance.models import FinanceEntry  # noqa: PLC0415
+
+        # Predicados comuns para filtrar os fretes
+        freight_filters = [
+            Freight.deleted_at.is_(None),
+            Freight.tenant_id == self._tenant_id,
+        ]
+        if status:
+            freight_filters.append(Freight.status == status)
+        if driver_id:
+            freight_filters.append(Freight.driver_id == driver_id)
+        if truck_id:
+            freight_filters.append(Freight.truck_id == truck_id)
+        if competencia_mes and competencia_ano:
+            freight_filters.append(
+                freight_competencia_filter_clause(competencia_ano, competencia_mes)
+            )
+
+        now_utc = datetime.now(timezone.utc)
+        is_overdue = (
+            Freight.data_entrega_prevista.isnot(None)
+            & (Freight.data_entrega_prevista < now_utc)
+            & Freight.status.notin_([FreightStatus.ENTREGUE, FreightStatus.CANCELADO])
+        )
+
+        # Query 1: agregados dos fretes (count, faturamento, atrasos)
+        q1 = select(
+            func.count(Freight.id).label("quantidade_fretes"),
+            func.coalesce(func.sum(Freight.valor_frete), 0.0).label("faturamento_bruto"),
+            func.count(Freight.id).filter(is_overdue).label("com_atraso"),
+        ).where(*freight_filters)
+
+        r1 = (await self._session.execute(q1)).one()
+
+        # Query 2: gastos via FinanceEntry vinculados aos fretes filtrados
+        q2 = (
+            select(func.coalesce(func.sum(FinanceEntry.valor), 0.0).label("gastos"))
+            .join(Freight, FinanceEntry.freight_id == Freight.id)
+            .where(
+                FinanceEntry.deleted_at.is_(None),
+                FinanceEntry.tenant_id == self._tenant_id,
+                FinanceEntry.tipo == FinanceEntryType.DESPESA,
+                FinanceEntry.status != FinanceEntryStatus.CANCELADO,
+                *freight_filters,
+            )
+        )
+        r2 = (await self._session.execute(q2)).one()
+
+        faturamento = float(r1.faturamento_bruto)
+        gastos = float(r2.gastos)
+        return {
+            "faturamento_bruto": faturamento,
+            "gastos": gastos,
+            "margem": faturamento - gastos,
+            "quantidade_fretes": int(r1.quantidade_fretes),
+            "com_atraso": int(r1.com_atraso or 0),
+        }
 
     async def list_costs_by_freight(self, freight_id: uuid.UUID) -> list[FreightCost]:
         result = await self._session.execute(

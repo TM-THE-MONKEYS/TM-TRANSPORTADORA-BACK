@@ -16,7 +16,6 @@ from app.shared.pagination import PageParams
 
 log = structlog.get_logger(__name__)
 
-
 def _entry_competencia_date(entry: FinanceEntry) -> date | None:
     if entry.data_vencimento:
         return entry.data_vencimento
@@ -44,7 +43,11 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
         vencimento_to: date | None = None,
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
     ) -> tuple[list[FinanceEntry], int]:
+        from app.modules.freights.models import Freight  # noqa: PLC0415
+
         query = self._base_query()
         if tipo:
             query = query.where(FinanceEntry.tipo == tipo)
@@ -60,6 +63,12 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
             query = query.where(FinanceEntry.data_vencimento <= vencimento_to)
         if competencia_mes and competencia_ano:
             query = apply_competencia_filter(query, competencia_ano, competencia_mes)
+        if truck_id or driver_id:
+            query = query.join(Freight, FinanceEntry.freight_id == Freight.id)
+            if truck_id:
+                query = query.where(Freight.truck_id == truck_id)
+            if driver_id:
+                query = query.where(Freight.driver_id == driver_id)
         total = await self._count(query)
         result = await self._session.execute(
             query.order_by(FinanceEntry.created_at.desc()).offset(params.offset).limit(params.limit)
@@ -77,7 +86,11 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
         self,
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
     ) -> dict[str, float]:
+        from app.modules.freights.models import Freight  # noqa: PLC0415
+
         base = select(
             FinanceEntry.tipo,
             FinanceEntry.status,
@@ -90,6 +103,12 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
 
         if competencia_mes and competencia_ano:
             base = apply_competencia_filter(base, competencia_ano, competencia_mes)
+        if truck_id or driver_id:
+            base = base.join(Freight, FinanceEntry.freight_id == Freight.id)
+            if truck_id:
+                base = base.where(Freight.truck_id == truck_id)
+            if driver_id:
+                base = base.where(Freight.driver_id == driver_id)
 
         result = await self._session.execute(base.group_by(FinanceEntry.tipo, FinanceEntry.status))
         summary: dict[str, float] = {

@@ -67,6 +67,8 @@ class FinanceService:
         vencimento_to: date | None = None,
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
     ) -> PagedResponse[FinanceEntry]:
         self._check_read_access(requesting_user)
         items, total = await self._repo.list(
@@ -79,6 +81,8 @@ class FinanceService:
             vencimento_to,
             competencia_mes,
             competencia_ano,
+            truck_id,
+            driver_id,
         )
         return PagedResponse.create(items, total, params)
 
@@ -106,9 +110,13 @@ class FinanceService:
         requesting_user: User,
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
     ) -> CashFlowResponse:
         self._check_read_access(requesting_user)
-        summary = await self._repo.get_cash_flow_summary(competencia_mes, competencia_ano)
+        summary = await self._repo.get_cash_flow_summary(
+            competencia_mes, competencia_ano, truck_id, driver_id
+        )
         return CashFlowResponse(**summary)
 
     async def get_competencia_report(

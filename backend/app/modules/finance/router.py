@@ -54,9 +54,13 @@ async def get_cash_flow(
     current_user: Annotated[User, Depends(get_current_active_user)],
     competencia_mes: int | None = Query(default=None, ge=1, le=12),
     competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
+    truck_id: uuid.UUID | None = Query(default=None),
+    driver_id: uuid.UUID | None = Query(default=None),
 ) -> CashFlowResponse:
     service = FinanceService(db, current_user.tenant_id)
-    return await service.get_cash_flow(current_user, competencia_mes, competencia_ano)
+    return await service.get_cash_flow(
+        current_user, competencia_mes, competencia_ano, truck_id, driver_id
+    )
 
 
 @router.get("/competencia-report", response_model=CompetenciaReportResponse)
@@ -164,6 +168,8 @@ async def list_finance_entries(
     vencimento_to: date | None = Query(default=None),
     competencia_mes: int | None = Query(default=None, ge=1, le=12),
     competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
+    truck_id: uuid.UUID | None = Query(default=None),
+    driver_id: uuid.UUID | None = Query(default=None),
 ) -> PagedResponse[FinanceEntryListResponse]:
     service = FinanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
@@ -178,6 +184,8 @@ async def list_finance_entries(
         vencimento_to,
         competencia_mes,
         competencia_ano,
+        truck_id,
+        driver_id,
     )
 
 

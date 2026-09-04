@@ -17,6 +17,7 @@ from app.modules.freights.schemas import (
     FreightFrontendListItem,
     FreightFrontendRead,
     FreightStatusUpdate,
+    FreightSummaryResponse,
     FreightUpdate,
 )
 from app.modules.freights.service import FreightService
@@ -25,6 +26,24 @@ from app.shared.enums import FreightStatus
 from app.shared.pagination import PagedResponse, PageParams
 
 router = APIRouter(prefix="/freights", tags=["freights"])
+
+
+@router.get("/summary", response_model=FreightSummaryResponse)
+async def get_freights_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
+    driver_id: uuid.UUID | None = Query(default=None),
+    truck_id: uuid.UUID | None = Query(default=None),
+    status: FreightStatus | None = Query(default=None),
+) -> FreightSummaryResponse:
+    """Resumo agregado para cards — reutilizável por Fretes / Frota / Motoristas."""
+    service = FreightService(db, current_user.tenant_id)
+    data = await service.get_summary(
+        current_user, status, driver_id, truck_id, competencia_mes, competencia_ano
+    )
+    return FreightSummaryResponse(**data)
 
 
 @router.get("", response_model=PagedResponse[FreightFrontendListItem])
@@ -37,11 +56,14 @@ async def list_freights(
     client_id: uuid.UUID | None = Query(default=None),
     driver_id: uuid.UUID | None = Query(default=None),
     truck_id: uuid.UUID | None = Query(default=None),
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[FreightFrontendListItem]:
     service = FreightService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     result = await service.list(
-        params, current_user, status, client_id, driver_id, truck_id
+        params, current_user, status, client_id, driver_id, truck_id,
+        competencia_mes, competencia_ano,
     )
     frontend_items = [FreightFrontendListItem.from_orm(f) for f in result.items]
     return PagedResponse.create(frontend_items, result.total, params)

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import extract, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.maintenance.models import Maintenance
@@ -28,6 +28,8 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         truck_id: uuid.UUID | None = None,
         status: MaintenanceStatus | None = None,
         tipo: MaintenanceType | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> tuple[list[Maintenance], int]:
         query = self._base_query()
         if truck_id:
@@ -36,6 +38,22 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
             query = query.where(Maintenance.status == status)
         if tipo:
             query = query.where(Maintenance.tipo == tipo)
+        if competencia_mes and competencia_ano:
+            # Filtra por data_prevista → created_at (fallback)
+            query = query.where(
+                or_(
+                    (
+                        Maintenance.data_prevista.isnot(None)
+                        & (extract("year", Maintenance.data_prevista) == competencia_ano)
+                        & (extract("month", Maintenance.data_prevista) == competencia_mes)
+                    ),
+                    (
+                        Maintenance.data_prevista.is_(None)
+                        & (extract("year", Maintenance.created_at) == competencia_ano)
+                        & (extract("month", Maintenance.created_at) == competencia_mes)
+                    ),
+                )
+            )
         total = await self._count(query)
         result = await self._session.execute(
             query.order_by(Maintenance.created_at.desc()).offset(params.offset).limit(params.limit)
