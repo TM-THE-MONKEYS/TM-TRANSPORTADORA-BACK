@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import uuid
-
-import structlog
 from datetime import date, timedelta
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,18 +16,15 @@ from app.modules.dashboard.schemas import (
     FreightSummary,
     RevenuePoint,
 )
-from app.modules.drivers.models import Driver
+from app.modules.drivers.repository import DriverRepository
 from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
-from app.modules.freights.models import Freight
 from app.modules.freights.repository import FreightRepository
 from app.modules.maintenance.repository import MaintenanceRepository
 from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
-from app.shared.enums import DriverStatus, FinanceEntryStatus, FinanceEntryType, FreightStatus, UserRole
-from app.shared.exceptions.custom import ForbiddenException
-
-log = structlog.get_logger(__name__)
+from app.shared.enums import FinanceEntryStatus, FinanceEntryType, UserRole
+from app.shared.exceptions.custom import BadRequestException, ForbiddenException
 
 
 class DashboardService:
@@ -40,27 +36,86 @@ class DashboardService:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR, UserRole.FINANCEIRO):
             raise ForbiddenException("Acesso negado ao dashboard")
 
-    async def _get_detailed_kpis(self, requesting_user: User) -> DashboardKPIs:
+    def _validate_period(
+        self, period_from: date | None, period_to: date | None
+    ) -> None:
+        if (
+            period_from is not None
+            and period_to is not None
+            and period_from > period_to
+        ):
+            raise BadRequestException(
+                "period_from não pode ser posterior a period_to."
+            )
+
+    async def _get_detailed_kpis(
+        self,
+        requesting_user: User,
+        *,
+        branch_id: uuid.UUID | None = None,
+        client_id: uuid.UUID | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
+        period_from: date | None = None,
+        period_to: date | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> DashboardKPIs:
         self._check_access(requesting_user)
+        self._validate_period(period_from, period_to)
+        # branch_id aceito para compatibilidade com o client; não há coluna
+        # (branches deferred). Isolamento já é por tenant_id.
+        _ = branch_id
 
         truck_repo = TruckRepository(self._session, self._tenant_id)
+        driver_repo = DriverRepository(self._session, self._tenant_id)
         freight_repo = FreightRepository(self._session, self._tenant_id)
         finance_repo = FinanceRepository(self._session, self._tenant_id)
         maintenance_repo = MaintenanceRepository(self._session, self._tenant_id)
 
-        truck_counts = await truck_repo.count_by_status()
-        freight_counts = await freight_repo.count_by_status()
-        cash_flow = await finance_repo.get_cash_flow_summary()
-        maintenance_alerts = await maintenance_repo.get_upcoming_alerts(days_ahead=30)
+        freight_scope = {
+            "client_id": client_id,
+            "driver_id": driver_id,
+            "truck_id": truck_id,
+            "competencia_mes": competencia_mes,
+            "competencia_ano": competencia_ano,
+            "period_from": period_from,
+            "period_to": period_to,
+        }
 
-        active_drivers_result = await self._session.execute(
-            select(func.count(Driver.id)).where(
-                Driver.deleted_at.is_(None),
-                Driver.status == DriverStatus.ATIVO,
-                Driver.tenant_id == self._tenant_id,
-            )
+        truck_counts = await truck_repo.count_by_status()
+        freight_counts = await freight_repo.count_by_status(**freight_scope)
+        cash_flow = await finance_repo.get_cash_flow_summary(
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            truck_id=truck_id,
+            driver_id=driver_id,
+            client_id=client_id,
+            period_from=period_from,
+            period_to=period_to,
         )
-        active_drivers = active_drivers_result.scalar_one()
+        maintenance_alerts = await maintenance_repo.get_upcoming_alerts(
+            days_ahead=30, truck_id=truck_id
+        )
+
+        active_trucks = await truck_repo.count_operational(
+            truck_id=truck_id,
+            driver_id=driver_id,
+            client_id=client_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            period_from=period_from,
+            period_to=period_to,
+        )
+        active_drivers = await driver_repo.count_active(
+            driver_id=driver_id,
+            truck_id=truck_id,
+            client_id=client_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            period_from=period_from,
+            period_to=period_to,
+        )
 
         fleet = FleetSummary(
             total=sum(truck_counts.values()),
@@ -94,23 +149,65 @@ class DashboardService:
             finance=finance,
             active_drivers=active_drivers,
             upcoming_maintenance_alerts=len(maintenance_alerts),
+            active_trucks=active_trucks,
         )
 
-    async def get_kpis(self, requesting_user: User) -> DashboardKPIsFrontend:
+    async def get_kpis(
+        self,
+        requesting_user: User,
+        *,
+        branch_id: uuid.UUID | None = None,
+        client_id: uuid.UUID | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
+        period_from: date | None = None,
+        period_to: date | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> DashboardKPIsFrontend:
         """Return flat KPIs matching the frontend DashboardKpis interface."""
-        detailed = await self._get_detailed_kpis(requesting_user)
+        detailed = await self._get_detailed_kpis(
+            requesting_user,
+            branch_id=branch_id,
+            client_id=client_id,
+            truck_id=truck_id,
+            driver_id=driver_id,
+            period_from=period_from,
+            period_to=period_to,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+        )
         return DashboardKPIsFrontend.from_detailed(detailed)
 
-    async def get_freights_by_status(self, requesting_user: User) -> list[FreightStatusCount]:
+    async def get_freights_by_status(
+        self,
+        requesting_user: User,
+        *,
+        branch_id: uuid.UUID | None = None,
+        client_id: uuid.UUID | None = None,
+        truck_id: uuid.UUID | None = None,
+        driver_id: uuid.UUID | None = None,
+        period_from: date | None = None,
+        period_to: date | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> list[FreightStatusCount]:
         self._check_access(requesting_user)
-        result = await self._session.execute(
-            select(Freight.status, func.count(Freight.id).label("count"))
-            .where(Freight.deleted_at.is_(None), Freight.tenant_id == self._tenant_id)
-            .group_by(Freight.status)
+        self._validate_period(period_from, period_to)
+        _ = branch_id
+        freight_repo = FreightRepository(self._session, self._tenant_id)
+        counts = await freight_repo.count_by_status(
+            client_id=client_id,
+            driver_id=driver_id,
+            truck_id=truck_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            period_from=period_from,
+            period_to=period_to,
         )
         return [
-            FreightStatusCount(status=row.status, count=row.count)
-            for row in result.all()
+            FreightStatusCount(status=status, count=count)
+            for status, count in counts.items()
         ]
 
     async def get_revenue_series(

@@ -167,12 +167,20 @@ class FreightService:
         truck_id: uuid.UUID | None = None,
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
+        search: str | None = None,
     ) -> PagedResponse[Freight]:
         driver_id = await resolve_freight_list_driver_filter(
             self._session, requesting_user, driver_id
         )
         items, total = await self._repo.list(
-            params, status, client_id, driver_id, truck_id, competencia_mes, competencia_ano
+            params,
+            status,
+            client_id,
+            driver_id,
+            truck_id,
+            competencia_mes,
+            competencia_ano,
+            search,
         )
         return PagedResponse.create(items, total, params)
 

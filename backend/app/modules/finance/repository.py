@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.finance.models import FinanceEntry
 from app.shared.base_repository import TenantBaseRepository
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType
-from app.shared.filters.competencia import apply_competencia_filter, competencia_bounds
+from app.shared.filters.competencia import (
+    apply_competencia_filter,
+    competencia_bounds,
+    finance_period_filter_clause,
+)
 from app.shared.pagination import PageParams
 
 log = structlog.get_logger(__name__)
@@ -88,6 +92,9 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
         competencia_ano: int | None = None,
         truck_id: uuid.UUID | None = None,
         driver_id: uuid.UUID | None = None,
+        client_id: uuid.UUID | None = None,
+        period_from: date | None = None,
+        period_to: date | None = None,
     ) -> dict[str, float]:
         from app.modules.freights.models import Freight  # noqa: PLC0415
 
@@ -101,14 +108,24 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
             FinanceEntry.status != FinanceEntryStatus.CANCELADO,
         )
 
-        if competencia_mes and competencia_ano:
+        if competencia_mes is not None and competencia_ano is not None:
             base = apply_competencia_filter(base, competencia_ano, competencia_mes)
-        if truck_id or driver_id:
+        elif period_from is not None or period_to is not None:
+            base = base.where(
+                finance_period_filter_clause(period_from, period_to)
+            )
+        if truck_id or driver_id or client_id:
             base = base.join(Freight, FinanceEntry.freight_id == Freight.id)
+            base = base.where(
+                Freight.deleted_at.is_(None),
+                Freight.tenant_id == self._tenant_id,
+            )
             if truck_id:
                 base = base.where(Freight.truck_id == truck_id)
             if driver_id:
                 base = base.where(Freight.driver_id == driver_id)
+            if client_id:
+                base = base.where(Freight.client_id == client_id)
 
         result = await self._session.execute(base.group_by(FinanceEntry.tipo, FinanceEntry.status))
         summary: dict[str, float] = {

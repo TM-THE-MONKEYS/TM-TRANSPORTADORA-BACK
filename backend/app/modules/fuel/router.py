@@ -9,6 +9,7 @@ from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
 from app.modules.fuel.schemas import (
     ActiveFreightContext,
@@ -78,18 +79,17 @@ async def get_freight_fuel_summary(
 async def list_fuel_refills(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
-    competencia_mes: int | None = Query(default=None, ge=1, le=12),
-    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[FuelRefillRead]:
     """Histórico geral de abastecimentos (admin/operador: todos; motorista: só os seus)."""
     service = FuelService(db, current_user.tenant_id)
     return await service.list_all(
         PageParams(page=page, size=size),
         current_user,
-        competencia_mes=competencia_mes,
-        competencia_ano=competencia_ano,
+        competencia_mes=competencia.mes,
+        competencia_ano=competencia.ano,
     )
 
 

@@ -60,17 +60,18 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         )
         return list(result.scalars().all()), total
 
-    async def get_upcoming_alerts(self, days_ahead: int = 30) -> list[Maintenance]:
+    async def get_upcoming_alerts(
+        self, days_ahead: int = 30, truck_id: uuid.UUID | None = None
+    ) -> list[Maintenance]:
         from datetime import timedelta
         cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
-        result = await self._session.execute(
-            select(Maintenance)
-            .where(
-                Maintenance.deleted_at.is_(None),
-                Maintenance.tenant_id == self._tenant_id,
-                Maintenance.status == MaintenanceStatus.AGENDADA,
-                Maintenance.data_prevista <= cutoff,
-            )
-            .order_by(Maintenance.data_prevista)
+        query = select(Maintenance).where(
+            Maintenance.deleted_at.is_(None),
+            Maintenance.tenant_id == self._tenant_id,
+            Maintenance.status == MaintenanceStatus.AGENDADA,
+            Maintenance.data_prevista <= cutoff,
         )
+        if truck_id is not None:
+            query = query.where(Maintenance.truck_id == truck_id)
+        result = await self._session.execute(query.order_by(Maintenance.data_prevista))
         return list(result.scalars().all())

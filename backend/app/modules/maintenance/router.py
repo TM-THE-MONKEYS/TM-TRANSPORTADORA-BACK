@@ -9,6 +9,7 @@ from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
 from app.modules.maintenance.schemas import (
     MaintenanceCreate,
@@ -28,18 +29,23 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 async def list_maintenance(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     truck_id: uuid.UUID | None = Query(default=None),
     status: MaintenanceStatus | None = Query(default=None),
     tipo: MaintenanceType | None = Query(default=None),
-    competencia_mes: int | None = Query(default=None, ge=1, le=12),
-    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
 ) -> PagedResponse[MaintenanceListResponse]:
     service = MaintenanceService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     return await service.list(  # type: ignore[return-value]
-        params, current_user, truck_id, status, tipo, competencia_mes, competencia_ano
+        params,
+        current_user,
+        truck_id,
+        status,
+        tipo,
+        competencia.mes,
+        competencia.ano,
     )
 
 

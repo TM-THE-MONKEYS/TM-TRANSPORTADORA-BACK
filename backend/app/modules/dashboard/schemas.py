@@ -38,6 +38,7 @@ class DashboardKPIs(BaseModel):
     finance: FinanceSummary
     active_drivers: int
     upcoming_maintenance_alerts: int
+    active_trucks: int | None = None
 
 
 # ── Frontend-compatible flat schema (matches Next.js DashboardKpis type) ────
@@ -61,7 +62,11 @@ class DashboardKPIsFrontend(BaseModel):
                 + kpis.freights.em_coleta
                 + kpis.freights.em_transporte
             ),
-            active_trucks=kpis.fleet.disponivel + kpis.fleet.em_viagem,
+            active_trucks=(
+                kpis.active_trucks
+                if kpis.active_trucks is not None
+                else kpis.fleet.disponivel + kpis.fleet.em_viagem
+            ),
             available_drivers=kpis.active_drivers,
             monthly_revenue_brl=kpis.finance.receita_total,
             operational_costs_brl=kpis.finance.despesa_total,

@@ -9,6 +9,7 @@ from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
 from app.modules.trucks.implement_schemas import (
     TruckImplementCreate,
@@ -34,14 +35,24 @@ router = APIRouter(prefix="/trucks", tags=["trucks"])
 async def list_trucks(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     status: TruckStatus | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
+    driver_id: uuid.UUID | None = Query(default=None),
 ) -> PagedResponse[TruckFrontendListItem]:
     service = TruckService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
-    result = await service.list(params, current_user, status, search)
+    result = await service.list(
+        params,
+        current_user,
+        status,
+        search,
+        competencia_mes=competencia.mes,
+        competencia_ano=competencia.ano,
+        driver_id=driver_id,
+    )
     frontend_items = [TruckFrontendListItem.from_orm(t) for t in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
 
