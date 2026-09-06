@@ -340,3 +340,91 @@ async def test_driver_document_upload_list_download_delete(
     )
     assert list_after.status_code == 200
     assert list_after.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_drivers_filters_by_competencia_and_truck(
+    client: AsyncClient,
+    operador_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    from tests.freights.test_freights_router import _create_freight
+
+    driver_with_freight = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Motorista Com Frete",
+            "cpf": "52998224725",
+            "cnh": "12345678901",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert driver_with_freight.status_code == 201, driver_with_freight.text
+    driver_id = driver_with_freight.json()["id"]
+
+    idle = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Motorista Sem Frete",
+            "cpf": "39053344705",
+            "cnh": "98765432109",
+            "cnh_category": "D",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert idle.status_code == 201, idle.text
+    idle_id = idle.json()["id"]
+
+    truck = await client.post(
+        "/api/v1/trucks",
+        json={
+            "placa": "DRVTRK1",
+            "modelo": "FH 540",
+            "marca": "Volvo",
+            "ano": 2022,
+            "capacidade_kg": 25000.0,
+        },
+        headers=operador_headers,
+    )
+    assert truck.status_code == 201, truck.text
+    truck_id = truck.json()["id"]
+
+    await _create_freight(
+        client,
+        operador_headers,
+        db_session,
+        test_tenant,
+        truck_id=truck_id,
+        driver_id=driver_id,
+    )
+
+    today = date.today()
+    filtered = await client.get(
+        f"/api/v1/drivers?competencia_mes={today.month}&competencia_ano={today.year}",
+        headers=operador_headers,
+    )
+    assert filtered.status_code == 200
+    ids = {item["id"] for item in filtered.json()["items"]}
+    assert driver_id in ids
+    assert idle_id not in ids
+
+    by_truck = await client.get(
+        f"/api/v1/drivers?competencia_mes={today.month}"
+        f"&competencia_ano={today.year}&truck_id={truck_id}",
+        headers=operador_headers,
+    )
+    assert by_truck.status_code == 200
+    assert {item["id"] for item in by_truck.json()["items"]} == {driver_id}
+
+    unfiltered = await client.get(
+        "/api/v1/drivers?page=1&size=100",
+        headers=operador_headers,
+    )
+    assert unfiltered.status_code == 200
+    all_ids = {item["id"] for item in unfiltered.json()["items"]}
+    assert driver_id in all_ids
+    assert idle_id in all_ids

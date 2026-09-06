@@ -55,9 +55,19 @@ class TruckService:
         requesting_user: User,
         status: TruckStatus | None = None,
         search: str | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+        driver_id: uuid.UUID | None = None,
     ) -> PagedResponse[Truck]:
         assert_catalog_read_access(requesting_user)
-        items, total = await self._repo.list(params, status, search)
+        items, total = await self._repo.list(
+            params,
+            status,
+            search,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            driver_id=driver_id,
+        )
         return PagedResponse.create(items, total, params)
 
     async def update(self, truck_id: uuid.UUID, data: TruckUpdate, updated_by: User) -> Truck:

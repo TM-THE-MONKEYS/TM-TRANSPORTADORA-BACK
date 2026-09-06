@@ -103,3 +103,41 @@ async def test_fixed_expense_launch_status(
     )
     assert launch.status_code == 200
     assert launch.json()["launched_count"] >= 1
+
+
+def _months_ahead(delta: int) -> tuple[int, int]:
+    today = date.today()
+    total = today.year * 12 + (today.month - 1) + delta
+    return total // 12, total % 12 + 1
+
+
+@pytest.mark.asyncio
+async def test_competencia_report_rejects_too_far_ahead(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: object,
+) -> None:
+    headers = await _financeiro_headers(db_session, test_tenant)
+    year, month = _months_ahead(3)
+    response = await client.get(
+        f"/api/v1/finance/competencia-report?competencia_mes={month}&competencia_ano={year}",
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert "2 meses à frente" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_rejects_competencia_too_far_ahead(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: object,
+) -> None:
+    headers = await _financeiro_headers(db_session, test_tenant)
+    year, month = _months_ahead(3)
+    response = await client.get(
+        f"/api/v1/finance/cash-flow?competencia_mes={month}&competencia_ano={year}",
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert "2 meses à frente" in response.json()["detail"]

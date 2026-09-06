@@ -21,4 +21,4 @@ RUN poetry install --only=main --no-root
 
 COPY . .
 
-CMD ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+CMD ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--beat", "--schedule=/tmp/celerybeat-schedule", "--loglevel=info", "--concurrency=4"]

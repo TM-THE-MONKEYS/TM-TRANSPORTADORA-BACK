@@ -9,6 +9,7 @@ from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
 from app.modules.freights.schemas import (
     FreightCostCreate,
@@ -17,6 +18,7 @@ from app.modules.freights.schemas import (
     FreightFrontendListItem,
     FreightFrontendRead,
     FreightStatusUpdate,
+    FreightSummaryResponse,
     FreightUpdate,
 )
 from app.modules.freights.service import FreightService
@@ -27,21 +29,48 @@ from app.shared.pagination import PagedResponse, PageParams
 router = APIRouter(prefix="/freights", tags=["freights"])
 
 
+@router.get("/summary", response_model=FreightSummaryResponse)
+async def get_freights_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
+    driver_id: uuid.UUID | None = Query(default=None),
+    truck_id: uuid.UUID | None = Query(default=None),
+    status: FreightStatus | None = Query(default=None),
+) -> FreightSummaryResponse:
+    """Resumo agregado para cards — reutilizável por Fretes / Frota / Motoristas."""
+    service = FreightService(db, current_user.tenant_id)
+    data = await service.get_summary(
+        current_user, status, driver_id, truck_id, competencia.mes, competencia.ano
+    )
+    return FreightSummaryResponse(**data)
+
+
 @router.get("", response_model=PagedResponse[FreightFrontendListItem])
 async def list_freights(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     status: FreightStatus | None = Query(default=None),
     client_id: uuid.UUID | None = Query(default=None),
     driver_id: uuid.UUID | None = Query(default=None),
     truck_id: uuid.UUID | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
 ) -> PagedResponse[FreightFrontendListItem]:
     service = FreightService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
     result = await service.list(
-        params, current_user, status, client_id, driver_id, truck_id
+        params,
+        current_user,
+        status,
+        client_id,
+        driver_id,
+        truck_id,
+        competencia.mes,
+        competencia.ano,
+        search,
     )
     frontend_items = [FreightFrontendListItem.from_orm(f) for f in result.items]
     return PagedResponse.create(frontend_items, result.total, params)

@@ -1,6 +1,16 @@
 """Unit tests for shared utilities."""
 from __future__ import annotations
 
+from datetime import date
+
+import pytest
+
+from app.shared.exceptions.custom import BadRequestException
+from app.shared.filters.competencia import (
+    is_competencia_within_limit,
+    resolve_competencia_pair,
+    validate_competencia_limit,
+)
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.utils.data_normalization import (
     normalize_digits,
@@ -110,3 +120,41 @@ class TestPagination:
         assert result.pages == 1
         assert result.has_next is False
         assert result.has_prev is False
+
+
+class TestCompetenciaLimit:
+    def test_current_month_ok(self) -> None:
+        today = date(2026, 9, 5)
+        assert is_competencia_within_limit(2026, 9, today=today) is True
+
+    def test_two_months_ahead_ok(self) -> None:
+        today = date(2026, 9, 5)
+        assert is_competencia_within_limit(2026, 11, today=today) is True
+
+    def test_three_months_ahead_false(self) -> None:
+        today = date(2026, 9, 5)
+        assert is_competencia_within_limit(2026, 12, today=today) is False
+
+    def test_past_month_true(self) -> None:
+        today = date(2026, 9, 5)
+        assert is_competencia_within_limit(2026, 1, today=today) is True
+        assert is_competencia_within_limit(2025, 12, today=today) is True
+
+    def test_year_boundary(self) -> None:
+        today = date(2026, 11, 30)
+        assert is_competencia_within_limit(2027, 1, today=today) is True
+        assert is_competencia_within_limit(2027, 2, today=today) is False
+
+    def test_validate_raises(self) -> None:
+        today = date(2026, 9, 5)
+        with pytest.raises(BadRequestException, match="2 meses à frente"):
+            validate_competencia_limit(2026, 12, today=today)
+
+    def test_resolve_pair_both_none(self) -> None:
+        assert resolve_competencia_pair(None, None) == (None, None)
+
+    def test_resolve_pair_partial_raises(self) -> None:
+        with pytest.raises(BadRequestException, match="juntos"):
+            resolve_competencia_pair(9, None)
+        with pytest.raises(BadRequestException, match="juntos"):
+            resolve_competencia_pair(None, 2026)

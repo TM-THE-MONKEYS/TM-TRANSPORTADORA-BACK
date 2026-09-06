@@ -165,12 +165,41 @@ class FreightService:
         client_id: uuid.UUID | None = None,
         driver_id: uuid.UUID | None = None,
         truck_id: uuid.UUID | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+        search: str | None = None,
     ) -> PagedResponse[Freight]:
         driver_id = await resolve_freight_list_driver_filter(
             self._session, requesting_user, driver_id
         )
-        items, total = await self._repo.list(params, status, client_id, driver_id, truck_id)
+        items, total = await self._repo.list(
+            params,
+            status,
+            client_id,
+            driver_id,
+            truck_id,
+            competencia_mes,
+            competencia_ano,
+            search,
+        )
         return PagedResponse.create(items, total, params)
+
+    async def get_summary(
+        self,
+        requesting_user: User,
+        status: FreightStatus | None = None,
+        driver_id: uuid.UUID | None = None,
+        truck_id: uuid.UUID | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+    ) -> dict[str, float | int]:
+        """Resumo agregado para cards — reutilizável por Fretes / Frota / Motoristas."""
+        driver_id = await resolve_freight_list_driver_filter(
+            self._session, requesting_user, driver_id
+        )
+        return await self._repo.get_summary(
+            status, driver_id, truck_id, competencia_mes, competencia_ano
+        )
 
     async def update(self, freight_id: uuid.UUID, data: FreightUpdate, updated_by: User) -> Freight:
         self._check_write_access(updated_by)

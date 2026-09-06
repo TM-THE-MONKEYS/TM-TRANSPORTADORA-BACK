@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.tenants.models import Tenant
 
 
 @pytest.mark.asyncio
@@ -189,3 +192,116 @@ async def test_truck_implements_crud(
         headers=operador_headers,
     )
     assert delete_resp.status_code == 204
+
+
+def _months_ahead(delta: int) -> tuple[int, int]:
+    from datetime import date
+
+    today = date.today()
+    total = today.year * 12 + (today.month - 1) + delta
+    return total // 12, total % 12 + 1
+
+
+async def _post_truck(
+    client: AsyncClient, headers: dict[str, str], placa: str
+) -> str:
+    response = await client.post(
+        "/api/v1/trucks",
+        json={
+            "placa": placa,
+            "modelo": "FH 540",
+            "marca": "Volvo",
+            "ano": 2022,
+            "capacidade_kg": 25000.0,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+async def _post_driver(
+    client: AsyncClient, headers: dict[str, str], cpf: str, cnh: str
+) -> str:
+    from datetime import date, timedelta
+
+    response = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Motorista Filtro",
+            "cpf": cpf,
+            "cnh": cnh,
+            "cnh_category": "E",
+            "cnh_expiry": (date.today() + timedelta(days=365)).isoformat(),
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_list_trucks_filters_by_competencia_and_driver(
+    client: AsyncClient,
+    operador_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    from datetime import date
+
+    from tests.freights.test_freights_router import _create_freight
+
+    truck_with_freight = await _post_truck(client, operador_headers, "FLTAAA1")
+    truck_idle = await _post_truck(client, operador_headers, "FLTBBB2")
+    driver_id = await _post_driver(
+        client, operador_headers, "52998224725", "12345678901"
+    )
+    await _create_freight(
+        client,
+        operador_headers,
+        db_session,
+        test_tenant,
+        truck_id=truck_with_freight,
+        driver_id=driver_id,
+    )
+
+    today = date.today()
+    filtered = await client.get(
+        f"/api/v1/trucks?competencia_mes={today.month}&competencia_ano={today.year}",
+        headers=operador_headers,
+    )
+    assert filtered.status_code == 200
+    ids = {item["id"] for item in filtered.json()["items"]}
+    assert truck_with_freight in ids
+    assert truck_idle not in ids
+
+    by_driver = await client.get(
+        f"/api/v1/trucks?competencia_mes={today.month}"
+        f"&competencia_ano={today.year}&driver_id={driver_id}",
+        headers=operador_headers,
+    )
+    assert by_driver.status_code == 200
+    driver_ids = {item["id"] for item in by_driver.json()["items"]}
+    assert driver_ids == {truck_with_freight}
+
+    unfiltered = await client.get(
+        "/api/v1/trucks?page=1&size=100",
+        headers=operador_headers,
+    )
+    assert unfiltered.status_code == 200
+    all_ids = {item["id"] for item in unfiltered.json()["items"]}
+    assert truck_with_freight in all_ids
+    assert truck_idle in all_ids
+
+
+@pytest.mark.asyncio
+async def test_list_trucks_rejects_competencia_too_far_ahead(
+    client: AsyncClient, operador_headers: dict[str, str]
+) -> None:
+    year, month = _months_ahead(3)
+    response = await client.get(
+        f"/api/v1/trucks?competencia_mes={month}&competencia_ano={year}",
+        headers=operador_headers,
+    )
+    assert response.status_code == 400
+    assert "2 meses à frente" in response.json()["detail"]

@@ -50,9 +50,13 @@ class MaintenanceService:
         truck_id: uuid.UUID | None = None,
         status: MaintenanceStatus | None = None,
         tipo: MaintenanceType | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
     ) -> PagedResponse[Maintenance]:
         assert_catalog_read_access(requesting_user)
-        items, total = await self._repo.list(params, truck_id, status, tipo)
+        items, total = await self._repo.list(
+            params, truck_id, status, tipo, competencia_mes, competencia_ano
+        )
         return PagedResponse.create(items, total, params)
 
     async def update(self, maintenance_id: uuid.UUID, data: MaintenanceUpdate, updated_by: User) -> Maintenance:

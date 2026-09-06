@@ -9,6 +9,7 @@ from starlette.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
 from app.modules.drivers.document_schemas import DriverDocumentFrontendRead
 from app.modules.drivers.document_service import DriverDocumentService
@@ -30,14 +31,24 @@ router = APIRouter(prefix="/drivers", tags=["drivers"])
 async def list_drivers(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia: OptionalCompetenciaDep,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     status: DriverStatus | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
+    truck_id: uuid.UUID | None = Query(default=None),
 ) -> PagedResponse[DriverFrontendListItem]:
     service = DriverService(db, current_user.tenant_id)
     params = PageParams(page=page, size=size)
-    result = await service.list(params, current_user, status, search)
+    result = await service.list(
+        params,
+        current_user,
+        status,
+        search,
+        competencia_mes=competencia.mes,
+        competencia_ano=competencia.ano,
+        truck_id=truck_id,
+    )
     frontend_items = [DriverFrontendListItem.from_orm(d) for d in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
 

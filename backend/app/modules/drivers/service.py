@@ -117,9 +117,19 @@ class DriverService:
         requesting_user: User,
         status: DriverStatus | None = None,
         search: str | None = None,
+        competencia_mes: int | None = None,
+        competencia_ano: int | None = None,
+        truck_id: uuid.UUID | None = None,
     ) -> PagedResponse[Driver]:
         assert_catalog_read_access(requesting_user)
-        items, total = await self._repo.list(params, status, search)
+        items, total = await self._repo.list(
+            params,
+            status,
+            search,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            truck_id=truck_id,
+        )
         return PagedResponse.create(items, total, params)
 
     async def update(self, driver_id: uuid.UUID, data: DriverUpdate, updated_by: User) -> Driver:

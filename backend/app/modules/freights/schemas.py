@@ -304,6 +304,16 @@ class FreightFrontendRead(BaseModel):
         )
 
 
+class FreightSummaryResponse(BaseModel):
+    """Resumo agregado de fretes — reutilizado por Fretes / Frota / Motoristas."""
+
+    faturamento_bruto: float
+    gastos: float
+    margem: float
+    quantidade_fretes: int
+    com_atraso: int
+
+
 class FreightFrontendListItem(BaseModel):
     id: uuid.UUID
     tenant_id: str = "default"

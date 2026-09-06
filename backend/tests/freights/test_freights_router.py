@@ -19,20 +19,38 @@ async def _create_freight(
     db_session: AsyncSession,
     tenant: Tenant,
     valor: float = 1500.0,
+    *,
+    truck_id: str | None = None,
+    driver_id: str | None = None,
+    observacoes: str | None = None,
+    origem_cidade: str = "São Paulo",
+    destino_cidade: str = "Rio de Janeiro",
 ) -> str:
-    db_client = Client(nome="Cliente Teste", cpf_cnpj=f"{uuid.uuid4().int % 10**14:014d}", tenant_id=tenant.id)
+    db_client = Client(
+        nome="Cliente Teste",
+        cpf_cnpj=f"{uuid.uuid4().int % 10**14:014d}",
+        tenant_id=tenant.id,
+    )
     db_session.add(db_client)
     await db_session.commit()
     await db_session.refresh(db_client)
 
+    payload: dict[str, object] = {
+        "client_id": str(db_client.id),
+        "origem": {"logradouro": "Rua A", "cidade": origem_cidade, "estado": "SP"},
+        "destino": {"logradouro": "Rua B", "cidade": destino_cidade, "estado": "RJ"},
+        "valor_frete": valor,
+    }
+    if truck_id is not None:
+        payload["truck_id"] = truck_id
+    if driver_id is not None:
+        payload["driver_id"] = driver_id
+    if observacoes is not None:
+        payload["observacoes"] = observacoes
+
     response = await client.post(
         "/api/v1/freights",
-        json={
-            "client_id": str(db_client.id),
-            "origem": {"logradouro": "Rua A", "cidade": "São Paulo", "estado": "SP"},
-            "destino": {"logradouro": "Rua B", "cidade": "Rio de Janeiro", "estado": "RJ"},
-            "valor_frete": valor,
-        },
+        json=payload,
         headers=headers,
     )
     assert response.status_code == 201, response.text
@@ -260,3 +278,79 @@ async def test_update_freight_value_syncs_revenue_entry(
     entries = await _active_finance_entries(db_session, freight_id)
     assert len(entries) == 1
     assert float(entries[0].valor) == 2500.0, "Receita deve acompanhar o novo valor do frete"
+
+
+def _months_ahead(delta: int) -> tuple[int, int]:
+    today = __import__("datetime").date.today()
+    total = today.year * 12 + (today.month - 1) + delta
+    return total // 12, total % 12 + 1
+
+
+@pytest.mark.asyncio
+async def test_list_freights_rejects_competencia_too_far_ahead(
+    client: AsyncClient, admin_headers: dict[str, str]
+) -> None:
+    year, month = _months_ahead(3)
+    response = await client.get(
+        f"/api/v1/freights?competencia_mes={month}&competencia_ano={year}",
+        headers=admin_headers,
+    )
+    assert response.status_code == 400
+    assert "2 meses à frente" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_list_freights_rejects_partial_competencia(
+    client: AsyncClient, admin_headers: dict[str, str]
+) -> None:
+    response = await client.get(
+        "/api/v1/freights?competencia_mes=9",
+        headers=admin_headers,
+    )
+    assert response.status_code == 400
+    assert "juntos" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_list_freights_search_by_city_and_notes(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    await _create_freight(
+        client,
+        admin_headers,
+        db_session,
+        test_tenant,
+        observacoes="carga especial XYZ",
+        origem_cidade="Campinas",
+    )
+    await _create_freight(
+        client,
+        admin_headers,
+        db_session,
+        test_tenant,
+        observacoes="outra carga",
+        origem_cidade="Santos",
+    )
+
+    by_notes = await client.get(
+        "/api/v1/freights?search=XYZ",
+        headers=admin_headers,
+    )
+    assert by_notes.status_code == 200
+    assert by_notes.json()["total"] == 1
+    assert len(by_notes.json()["items"]) == 1
+
+    by_city = await client.get(
+        "/api/v1/freights?search=Campinas",
+        headers=admin_headers,
+    )
+    assert by_city.status_code == 200
+    assert by_city.json()["total"] == 1
+    assert by_city.json()["items"][0]["origin_city"] == "CAMPINAS"
+
+    unfiltered = await client.get("/api/v1/freights", headers=admin_headers)
+    assert unfiltered.status_code == 200
+    assert unfiltered.json()["total"] >= 2
