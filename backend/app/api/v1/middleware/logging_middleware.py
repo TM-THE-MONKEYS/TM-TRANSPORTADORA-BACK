@@ -32,5 +32,15 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             client_ip=request.client.host if request.client else "unknown",
         )
 
+        if duration_ms >= 500:
+            log.warning(
+                "slow_request",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                client_ip=request.client.host if request.client else "unknown",
+            )
+
         response.headers["X-Request-ID"] = request_id
         return response

@@ -102,6 +102,11 @@ class FreightCostRead(BaseModel):
     created_at: datetime
 
 
+class FreightCostsSummaryItem(BaseModel):
+    freight_id: uuid.UUID
+    total_costs: float
+
+
 class FreightAttachmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

@@ -14,6 +14,7 @@ from app.api.v1.dependencies.database import get_db
 from app.modules.freights.schemas import (
     FreightCostCreate,
     FreightCostRead,
+    FreightCostsSummaryItem,
     FreightCreate,
     FreightFrontendListItem,
     FreightFrontendRead,
@@ -24,6 +25,7 @@ from app.modules.freights.schemas import (
 from app.modules.freights.service import FreightService
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus
+from app.shared.exceptions.custom import BadRequestException
 from app.shared.pagination import PagedResponse, PageParams
 
 router = APIRouter(prefix="/freights", tags=["freights"])
@@ -44,6 +46,34 @@ async def get_freights_summary(
         current_user, status, driver_id, truck_id, competencia.mes, competencia.ano
     )
     return FreightSummaryResponse(**data)
+
+
+@router.get("/costs-summary", response_model=list[FreightCostsSummaryItem])
+async def get_freights_costs_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    ids: Annotated[
+        str,
+        Query(
+            ...,
+            min_length=1,
+            description="IDs de frete (máx. 50), separados por vírgula",
+        ),
+    ],
+) -> list[FreightCostsSummaryItem]:
+    """Soma de FreightCost.valor por frete — batch para listagens."""
+    freight_ids: list[uuid.UUID] = []
+    for part in ids.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            freight_ids.append(uuid.UUID(token))
+        except ValueError as exc:
+            raise BadRequestException(f"ID de frete inválido: {token}") from exc
+
+    service = FreightService(db, current_user.tenant_id)
+    return await service.get_costs_summary(freight_ids, current_user)
 
 
 @router.get("", response_model=PagedResponse[FreightFrontendListItem])

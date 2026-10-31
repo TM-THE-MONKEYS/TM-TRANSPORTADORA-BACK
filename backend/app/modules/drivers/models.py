@@ -4,7 +4,17 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Date,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,12 +24,20 @@ from app.shared.enums import CNHCategory, DriverStatus
 
 class Driver(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_drivers"
+    __table_args__ = (
+        Index(
+            "uq_tm_drivers_user_id_not_null",
+            "user_id",
+            unique=True,
+            sqlite_where=text("user_id IS NOT NULL"),
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
+    )
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tm_users.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
     nome: Mapped[str] = mapped_column(String(150), nullable=False)
     cpf: Mapped[str] = mapped_column(String(14), nullable=False, unique=True, index=True)

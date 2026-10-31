@@ -16,11 +16,9 @@ from app.shared.utils.data_normalization import (
 from app.shared.utils.field_aliases import (
     DRIVER_CREATE_ALIASES,
     DRIVER_UPDATE_ALIASES,
-    map_fields,
     normalize_create_payload,
     normalize_date_field,
     normalize_update_payload,
-    strip_ignored_fields,
 )
 
 
@@ -35,15 +33,6 @@ class DriverCreate(BaseModel):
     status: DriverStatus = DriverStatus.ATIVO
     observacoes: str | None = None
     commission_pct: float | None = Field(default=None, ge=0, le=100)
-    user_id: uuid.UUID | None = None
-    password: str | None = Field(default=None, min_length=8)
-
-    @field_validator("password")
-    @classmethod
-    def password_strength(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        return _validate_password_strength(v)
 
     @model_validator(mode="before")
     @classmethod
@@ -61,8 +50,6 @@ class DriverCreate(BaseModel):
                 "email",
                 "observacoes",
                 "commission_pct",
-                "user_id",
-                "password",
             ),
             field_rules=DRIVER_CREATE_RULES,
         )
@@ -84,6 +71,25 @@ class DriverCreate(BaseModel):
         if v < date_type.today():
             raise ValueError("CNH vencida")
         return v
+
+
+class DriverAccountCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
+
+class DriverResetPassword(BaseModel):
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class DriverUpdate(BaseModel):
@@ -155,6 +161,8 @@ class DriverFrontendRead(BaseModel):
     cnh_expires_at: str  # ISO date string
     status: DriverStatus
     phone: str | None = None
+    email: str | None = None
+    user_id: uuid.UUID | None = None
     photo_url: str | None = None
     commission_pct: float | None = None
     created_at: str
@@ -176,6 +184,8 @@ class DriverFrontendRead(BaseModel):
             cnh_expires_at=driver.cnh_expiry.isoformat(),  # type: ignore[attr-defined]
             status=driver.status,  # type: ignore[attr-defined]
             phone=driver.telefone,  # type: ignore[attr-defined]
+            email=getattr(driver, "email", None),
+            user_id=getattr(driver, "user_id", None),
             photo_url=getattr(driver, "foto_url", None),  # type: ignore[attr-defined]
             commission_pct=(
                 float(driver.commission_pct)  # type: ignore[attr-defined]

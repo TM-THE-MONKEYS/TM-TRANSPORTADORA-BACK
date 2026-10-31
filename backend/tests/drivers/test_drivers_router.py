@@ -19,7 +19,7 @@ def _future_date() -> str:
 
 
 @pytest.mark.asyncio
-async def test_create_driver_without_password_creates_account(
+async def test_create_driver_without_user_account(
     client: AsyncClient, operador_headers: dict[str, str], operador_user: object
 ) -> None:
     cpf = "15350946056"
@@ -37,14 +37,14 @@ async def test_create_driver_without_password_creates_account(
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "JOÃO MOTORISTA"
-    assert data["temporary_password"] is not None
+    assert data["temporary_password"] is None
+    assert data["user_id"] is None
 
     login_resp = await client.post(
         "/api/v1/auth/driver/login",
-        json={"cpf": cpf, "password": data["temporary_password"]},
+        json={"cpf": cpf, "password": "Motor@123!"},
     )
-    assert login_resp.status_code == 200
-    assert login_resp.json()["user"]["role"] == "motorista"
+    assert login_resp.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -66,6 +66,375 @@ async def test_create_driver(
     data = response.json()
     assert data["name"] == "JOÃO MOTORISTA"
     assert data["cnh_category"] == "E"
+    assert data["temporary_password"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_driver_account_admin_ok(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    cpf = "15350946056"
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Conta Motorista",
+            "cpf": cpf,
+            "cnh": "12345678901",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "motorista.conta@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert account_resp.status_code == 201
+    account_data = account_resp.json()
+    assert account_data["temporary_password"] == "Motor@123!"
+    assert account_data["email"] == "motorista.conta@test.com"
+    assert account_data["user_id"] is not None
+
+    login_resp = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert login_resp.status_code == 200
+    assert login_resp.json()["user"]["role"] == "motorista"
+
+
+@pytest.mark.asyncio
+async def test_create_driver_account_operador_forbidden(
+    client: AsyncClient, operador_headers: dict[str, str]
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Sem Permissão Conta",
+            "cpf": "52998224725",
+            "cnh": "12345678901",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "op.forbidden@test.com", "password": "Motor@123!"},
+        headers=operador_headers,
+    )
+    assert account_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_driver_account_second_conflict(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Dupla Conta",
+            "cpf": "39053344705",
+            "cnh": "98765432109",
+            "cnh_category": "D",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    first = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "dupla.conta@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "outra.conta@test.com", "password": "Motor@456!"},
+        headers=admin_headers,
+    )
+    assert second.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_reset_driver_password(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    cpf = "11144477735"
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Reset Senha",
+            "cpf": cpf,
+            "cnh": "55566677788",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "reset.senha@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert account_resp.status_code == 201
+
+    reset_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/reset-password",
+        json={"password": "NovaSenha@1!"},
+        headers=admin_headers,
+    )
+    assert reset_resp.status_code == 200
+
+    old_login = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "NovaSenha@1!"},
+    )
+    assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reset_driver_password_without_account_404(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Sem Conta Reset",
+            "cpf": "71428793860",
+            "cnh": "11223344557",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    reset_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/reset-password",
+        json={"password": "NovaSenha@1!"},
+        headers=admin_headers,
+    )
+    assert reset_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_driver_account_keeps_driver(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    cpf = "10000000019"
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Conta Removida",
+            "cpf": cpf,
+            "cnh": "33445566778",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "conta.remover@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert account_resp.status_code == 201
+    user_id = account_resp.json()["user_id"]
+
+    login_resp = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert login_resp.status_code == 200
+    refresh_token = login_resp.json()["tokens"]["refresh_token"]
+
+    del_resp = await client.delete(
+        f"/api/v1/drivers/{driver_id}/account",
+        headers=admin_headers,
+    )
+    assert del_resp.status_code == 204
+
+    get_resp = await client.get(
+        f"/api/v1/drivers/{driver_id}",
+        headers=operador_headers,
+    )
+    assert get_resp.status_code == 200
+    driver_data = get_resp.json()
+    assert driver_data["user_id"] is None
+    assert driver_data["email"] is None
+    assert driver_data["name"] == "CONTA REMOVIDA"
+
+    login_after = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert login_after.status_code == 401
+
+    refresh_after = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    assert refresh_after.status_code == 401
+
+    recreate = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "conta.remover@test.com", "password": "Motor@999!"},
+        headers=admin_headers,
+    )
+    assert recreate.status_code == 201
+    assert recreate.json()["user_id"] is not None
+    assert recreate.json()["user_id"] != user_id
+
+
+@pytest.mark.asyncio
+async def test_delete_driver_account_without_account_404(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Sem Conta Delete",
+            "cpf": "10000000108",
+            "cnh": "44556677889",
+            "cnh_category": "D",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    del_resp = await client.delete(
+        f"/api/v1/drivers/{driver_id}/account",
+        headers=admin_headers,
+    )
+    assert del_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_driver_account_operador_forbidden(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Op Delete Conta",
+            "cpf": "10000000280",
+            "cnh": "55667788990",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "op.delete.conta@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert account_resp.status_code == 201
+
+    del_resp = await client.delete(
+        f"/api/v1/drivers/{driver_id}/account",
+        headers=operador_headers,
+    )
+    assert del_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_motorista_change_password(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    operador_headers: dict[str, str],
+) -> None:
+    cpf = "10000000361"
+    create_resp = await client.post(
+        "/api/v1/drivers",
+        json={
+            "nome": "Troca Senha Self",
+            "cpf": cpf,
+            "cnh": "66778899001",
+            "cnh_category": "E",
+            "cnh_expiry": _future_date(),
+        },
+        headers=operador_headers,
+    )
+    assert create_resp.status_code == 201
+    driver_id = create_resp.json()["id"]
+
+    account_resp = await client.post(
+        f"/api/v1/drivers/{driver_id}/account",
+        json={"email": "troca.senha@test.com", "password": "Motor@123!"},
+        headers=admin_headers,
+    )
+    assert account_resp.status_code == 201
+
+    login_resp = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert login_resp.status_code == 200
+    access = login_resp.json()["tokens"]["access_token"]
+    motorista_headers = {"Authorization": f"Bearer {access}"}
+
+    change_resp = await client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "Motor@123!", "new_password": "NovaSenha@2!"},
+        headers=motorista_headers,
+    )
+    assert change_resp.status_code == 200
+
+    old_login = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "Motor@123!"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/api/v1/auth/driver/login",
+        json={"cpf": cpf, "password": "NovaSenha@2!"},
+    )
+    assert new_login.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -14,20 +14,12 @@ from app.shared.enums import FinanceEntryStatus, FinanceEntryType
 from app.shared.filters.competencia import (
     apply_competencia_filter,
     competencia_bounds,
+    competencia_filter_clause,
     finance_period_filter_clause,
 )
 from app.shared.pagination import PageParams
 
 log = structlog.get_logger(__name__)
-
-def _entry_competencia_date(entry: FinanceEntry) -> date | None:
-    if entry.data_vencimento:
-        return entry.data_vencimento
-    if entry.data_pagamento:
-        return entry.data_pagamento
-    if entry.created_at:
-        return entry.created_at.date()
-    return None
 
 
 class FinanceRepository(TenantBaseRepository[FinanceEntry]):
@@ -156,8 +148,7 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
     async def get_competencia_aggregates(
         self, competencia_mes: int, competencia_ano: int
     ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
-        """Retorna séries diárias e despesas por categoria para a competência."""
-        entries = await self.list_for_competencia(competencia_mes, competencia_ano)
+        """Séries diárias e despesas por categoria via SUM/GROUP BY (sem carregar rows)."""
         first, last = competencia_bounds(competencia_ano, competencia_mes)
         daily: dict[str, dict[str, float]] = {}
         day = first
@@ -165,19 +156,64 @@ class FinanceRepository(TenantBaseRepository[FinanceEntry]):
             daily[day.isoformat()] = {"receitas": 0.0, "despesas": 0.0}
             day += timedelta(days=1)
 
-        by_category: dict[str, float] = {}
-        for entry in entries:
-            if entry.status == FinanceEntryStatus.CANCELADO:
+        # Competência efetiva: vencimento → pagamento → created_at (espelha
+        # competencia_filter_clause / _entry_competencia_date).
+        competencia_date = func.coalesce(
+            FinanceEntry.data_vencimento,
+            FinanceEntry.data_pagamento,
+            func.date(FinanceEntry.created_at),
+        )
+
+        base = (
+            select(
+                competencia_date.label("comp_day"),
+                FinanceEntry.tipo,
+                func.sum(FinanceEntry.valor).label("total"),
+            )
+            .where(
+                FinanceEntry.deleted_at.is_(None),
+                FinanceEntry.tenant_id == self._tenant_id,
+                FinanceEntry.status != FinanceEntryStatus.CANCELADO,
+            )
+            .where(competencia_filter_clause(competencia_ano, competencia_mes))
+            .group_by(competencia_date, FinanceEntry.tipo)
+        )
+
+        daily_result = await self._session.execute(base)
+        for comp_day, tipo, total in daily_result.all():
+            if comp_day is None:
                 continue
-            comp_date = _entry_competencia_date(entry)
-            if not comp_date or comp_date < first or comp_date > last:
+            if hasattr(comp_day, "isoformat"):
+                key = comp_day.isoformat()
+            else:
+                key = str(comp_day)
+            if key not in daily:
                 continue
-            key = comp_date.isoformat()
-            val = float(entry.valor)
-            if entry.tipo == FinanceEntryType.RECEITA:
+            val = float(total or 0.0)
+            if tipo == FinanceEntryType.RECEITA:
                 daily[key]["receitas"] += val
-            elif entry.tipo == FinanceEntryType.DESPESA:
+            elif tipo == FinanceEntryType.DESPESA:
                 daily[key]["despesas"] += val
-                by_category[entry.categoria] = by_category.get(entry.categoria, 0.0) + val
+
+        category_q = (
+            select(
+                FinanceEntry.categoria,
+                func.sum(FinanceEntry.valor).label("total"),
+            )
+            .where(
+                FinanceEntry.deleted_at.is_(None),
+                FinanceEntry.tenant_id == self._tenant_id,
+                FinanceEntry.status != FinanceEntryStatus.CANCELADO,
+                FinanceEntry.tipo == FinanceEntryType.DESPESA,
+            )
+            .where(competencia_filter_clause(competencia_ano, competencia_mes))
+            .group_by(FinanceEntry.categoria)
+        )
+        cat_result = await self._session.execute(category_q)
+        by_category: dict[str, float] = {
+            str(categoria): float(total or 0.0)
+            for categoria, total in cat_result.all()
+            if categoria is not None
+        }
 
         return daily, by_category

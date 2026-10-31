@@ -5,23 +5,26 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
-from starlette.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import Response, StreamingResponse
 
-from app.api.v1.dependencies.auth import get_current_active_user
+from app.api.v1.dependencies.auth import get_current_active_user, require_roles
 from app.api.v1.dependencies.competencia import OptionalCompetenciaDep
 from app.api.v1.dependencies.database import get_db
+from app.modules.auth.schemas import MessageResponse
 from app.modules.drivers.document_schemas import DriverDocumentFrontendRead
 from app.modules.drivers.document_service import DriverDocumentService
 from app.modules.drivers.schemas import (
+    DriverAccountCreate,
     DriverCreate,
     DriverFrontendListItem,
     DriverFrontendRead,
+    DriverResetPassword,
     DriverUpdate,
 )
 from app.modules.drivers.service import DriverService
 from app.modules.users.models import User
-from app.shared.enums import DriverDocumentType, DriverStatus
+from app.shared.enums import DriverDocumentType, DriverStatus, UserRole
 from app.shared.pagination import PagedResponse, PageParams
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
@@ -103,6 +106,58 @@ async def delete_driver(
     service = DriverService(db, current_user.tenant_id)
     await service.delete(driver_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{driver_id}/account",
+    response_model=DriverFrontendRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles(UserRole.ADMIN))],
+)
+async def create_driver_account(
+    driver_id: uuid.UUID,
+    payload: DriverAccountCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> DriverFrontendRead:
+    service = DriverService(db, current_user.tenant_id)
+    result = await service.create_account(driver_id, payload, current_user)
+    return DriverFrontendRead.from_orm(
+        result.driver,
+        temporary_password=result.temporary_password,
+    )
+
+
+@router.delete(
+    "/{driver_id}/account",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    dependencies=[Depends(require_roles(UserRole.ADMIN))],
+)
+async def delete_driver_account(
+    driver_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Response:
+    service = DriverService(db, current_user.tenant_id)
+    await service.delete_account(driver_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{driver_id}/reset-password",
+    response_model=MessageResponse,
+    dependencies=[Depends(require_roles(UserRole.ADMIN))],
+)
+async def reset_driver_password(
+    driver_id: uuid.UUID,
+    payload: DriverResetPassword,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> MessageResponse:
+    service = DriverService(db, current_user.tenant_id)
+    await service.reset_password(driver_id, payload, current_user)
+    return MessageResponse(message="Senha redefinida com sucesso")
 
 
 @router.get("/{driver_id}/documents", response_model=list[DriverDocumentFrontendRead])

@@ -218,6 +218,58 @@ class FreightRepository(TenantBaseRepository[Freight]):
         )
         return list(result.scalars().all())
 
+    async def filter_accessible_freight_ids(
+        self,
+        freight_ids: list[uuid.UUID],
+        *,
+        driver_id: uuid.UUID | None = None,
+    ) -> set[uuid.UUID]:
+        """Tenant-scoped freight IDs the caller may read (optional driver scope)."""
+        if not freight_ids:
+            return set()
+        query = select(Freight.id).where(
+            Freight.id.in_(freight_ids),
+            Freight.tenant_id == self._tenant_id,
+            Freight.deleted_at.is_(None),
+        )
+        if driver_id is not None:
+            query = query.where(Freight.driver_id == driver_id)
+        result = await self._session.execute(query)
+        return set(result.scalars().all())
+
+    async def sum_costs_by_freight_ids(
+        self,
+        freight_ids: list[uuid.UUID],
+        *,
+        driver_id: uuid.UUID | None = None,
+    ) -> dict[uuid.UUID, float]:
+        """SUM(valor) GROUP BY freight_id for a batch of freights (tenant-scoped)."""
+        if not freight_ids:
+            return {}
+
+        query = (
+            select(
+                FreightCost.freight_id,
+                func.coalesce(func.sum(FreightCost.valor), 0.0).label("total_costs"),
+            )
+            .join(Freight, Freight.id == FreightCost.freight_id)
+            .where(
+                FreightCost.freight_id.in_(freight_ids),
+                FreightCost.tenant_id == self._tenant_id,
+                Freight.tenant_id == self._tenant_id,
+                Freight.deleted_at.is_(None),
+            )
+            .group_by(FreightCost.freight_id)
+        )
+        if driver_id is not None:
+            query = query.where(Freight.driver_id == driver_id)
+
+        result = await self._session.execute(query)
+        return {
+            freight_id: float(total or 0.0)
+            for freight_id, total in result.all()
+        }
+
     async def add_stops(self, freight_id: uuid.UUID, stops: list[FreightStop]) -> list[FreightStop]:
         for stop in stops:
             stop.freight_id = freight_id

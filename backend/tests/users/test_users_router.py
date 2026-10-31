@@ -56,6 +56,25 @@ async def test_create_user(
 
 
 @pytest.mark.asyncio
+async def test_create_user_rejects_motorista_role(
+    client: AsyncClient, admin_headers: dict[str, str], admin_user: object
+) -> None:
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "nome": "Motorista Via Users",
+            "email": "motorista.users@test.com",
+            "password": "Motor@123!",
+            "role": "motorista",
+        },
+        headers=admin_headers,
+    )
+    assert response.status_code == 409
+    detail = str(response.json()["detail"])
+    assert "drivers" in detail.lower() or "motorista" in detail.lower()
+
+
+@pytest.mark.asyncio
 async def test_create_user_duplicate_email(
     client: AsyncClient, admin_headers: dict[str, str], admin_user: object
 ) -> None:
