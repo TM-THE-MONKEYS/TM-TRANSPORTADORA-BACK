@@ -32,6 +32,11 @@ class UserService:
         if created_by.role != UserRole.ADMIN:
             raise ForbiddenException("Apenas admins podem criar usuários")
 
+        if data.role == UserRole.MOTORISTA:
+            raise ConflictException(
+                "Contas de motorista só via POST /drivers/{id}/account"
+            )
+
         if await self._repo.exists_by_email(data.email):
             raise ConflictException("Email já cadastrado")
 
