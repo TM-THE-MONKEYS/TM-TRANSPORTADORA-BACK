@@ -153,24 +153,23 @@ class DashboardService:
         maintenance_alerts = await maintenance_repo.count_upcoming_alerts(
             days_ahead=30, truck_id=truck_id
         )
-        active_trucks = await truck_repo.count_operational(
-            truck_id=truck_id,
-            driver_id=driver_id,
-            client_id=client_id,
-            competencia_mes=competencia_mes,
-            competencia_ano=competencia_ano,
-            period_from=period_from,
-            period_to=period_to,
-        )
-        active_drivers = await driver_repo.count_active(
-            driver_id=driver_id,
-            truck_id=truck_id,
-            client_id=client_id,
-            competencia_mes=competencia_mes,
-            competencia_ano=competencia_ano,
-            period_from=period_from,
-            period_to=period_to,
-        )
+        # Contagens simples (sem EXISTS por competência): o filtro de
+        # competência já entra em freights/cash_flow. EXISTS correlacionado
+        # com extract() no pooler foi suspeito no 503 de /dashboard/kpis.
+        if truck_id is not None or driver_id is not None or client_id is not None:
+            active_trucks = await truck_repo.count_operational(
+                truck_id=truck_id,
+                driver_id=driver_id,
+                client_id=client_id,
+            )
+            active_drivers = await driver_repo.count_active(
+                driver_id=driver_id,
+                truck_id=truck_id,
+                client_id=client_id,
+            )
+        else:
+            active_trucks = None  # from_detailed usa frota disponivel+em_viagem
+            active_drivers = await driver_repo.count_active()
 
         fleet = FleetSummary(
             total=sum(truck_counts.values()),
