@@ -109,14 +109,24 @@ class DashboardService:
         self,
         *jobs: Callable[[AsyncSession], Awaitable[_T]],
     ) -> tuple[_T, ...]:
-        """Run independent reads in parallel.
+        """Run independent KPI reads.
 
-        AsyncSession is not concurrency-safe: each job gets a sibling session on
-        the same bind. SQLite StaticPool (tests) serializes to avoid connection
-        conflicts.
+        AsyncSession is not concurrency-safe across tasks. Sibling sessions via
+        asyncio.gather only work with a real connection pool.
+
+        Prod uses Supabase transaction pooler (NullPool): opening 6 concurrent
+        connections causes SQLAlchemyError → 503 "Banco de dados indisponível"
+        on /dashboard/kpis while single-session endpoints still succeed.
+        Serialize on NullPool/SQLite; parallelize only with pooled engines.
         """
+        from sqlalchemy.pool import NullPool
+
         bind = self._session.get_bind()
-        if bind.dialect.name == "sqlite":
+        use_sequential = (
+            bind.dialect.name == "sqlite"
+            or isinstance(getattr(bind, "pool", None), NullPool)
+        )
+        if use_sequential:
             results: list[_T] = []
             for job in jobs:
                 results.append(await job(self._session))
