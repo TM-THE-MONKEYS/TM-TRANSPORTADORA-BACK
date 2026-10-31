@@ -134,7 +134,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def sqlalchemy_exception_handler(
         request: Request, exc: SQLAlchemyError
     ) -> JSONResponse:
-        log.error(
+        log.exception(
             "database_error",
             exc_type=type(exc).__name__,
             exc_message=str(exc.__cause__ or exc),

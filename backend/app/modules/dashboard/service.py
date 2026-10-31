@@ -1,17 +1,14 @@
 """Dashboard service."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import uuid
-from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
-from typing import TypeVar
 
 import structlog
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.dashboard.schemas import (
     DashboardKPIs,
@@ -34,7 +31,6 @@ from app.shared.exceptions.custom import BadRequestException, ForbiddenException
 
 log = structlog.get_logger(__name__)
 
-_T = TypeVar("_T")
 _KPI_CACHE_TTL_SECONDS = 45
 
 
@@ -105,47 +101,6 @@ class DashboardService:
             f"{competencia_mes}:{competencia_ano}:{filters_hash}"
         )
 
-    async def _parallel_reads(
-        self,
-        *jobs: Callable[[AsyncSession], Awaitable[_T]],
-    ) -> tuple[_T, ...]:
-        """Run independent KPI reads.
-
-        AsyncSession is not concurrency-safe across tasks. Sibling sessions via
-        asyncio.gather only work with a real connection pool.
-
-        Prod uses Supabase transaction pooler (NullPool): opening 6 concurrent
-        connections causes SQLAlchemyError → 503 "Banco de dados indisponível"
-        on /dashboard/kpis while single-session endpoints still succeed.
-        Serialize on NullPool/SQLite; parallelize only with pooled engines.
-        """
-        from sqlalchemy.pool import NullPool
-
-        bind = self._session.get_bind()
-        use_sequential = (
-            bind.dialect.name == "sqlite"
-            or isinstance(getattr(bind, "pool", None), NullPool)
-        )
-        if use_sequential:
-            results: list[_T] = []
-            for job in jobs:
-                results.append(await job(self._session))
-            return tuple(results)
-
-        factory = async_sessionmaker(
-            bind=bind,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autocommit=False,
-            autoflush=False,
-        )
-
-        async def _run(job: Callable[[AsyncSession], Awaitable[_T]]) -> _T:
-            async with factory() as session:
-                return await job(session)
-
-        return tuple(await asyncio.gather(*(_run(job) for job in jobs)))
-
     async def _get_detailed_kpis(
         self,
         requesting_user: User,
@@ -175,66 +130,46 @@ class DashboardService:
             "period_to": period_to,
         }
 
-        async def _truck_counts(session: AsyncSession) -> dict[str, int]:
-            return await TruckRepository(session, self._tenant_id).count_by_status()
+        # Sempre sequencial na mesma AsyncSession.
+        # asyncio.gather + sessões irmãs quebra no pooler Supabase (NullPool /
+        # PgBouncer) → SQLAlchemyError → 503 em /dashboard/kpis.
+        truck_repo = TruckRepository(self._session, self._tenant_id)
+        freight_repo = FreightRepository(self._session, self._tenant_id)
+        finance_repo = FinanceRepository(self._session, self._tenant_id)
+        maintenance_repo = MaintenanceRepository(self._session, self._tenant_id)
+        driver_repo = DriverRepository(self._session, self._tenant_id)
 
-        async def _freight_counts(session: AsyncSession) -> dict[str, int]:
-            return await FreightRepository(session, self._tenant_id).count_by_status(
-                **freight_scope
-            )
-
-        async def _cash_flow(session: AsyncSession) -> dict[str, float]:
-            return await FinanceRepository(session, self._tenant_id).get_cash_flow_summary(
-                competencia_mes=competencia_mes,
-                competencia_ano=competencia_ano,
-                truck_id=truck_id,
-                driver_id=driver_id,
-                client_id=client_id,
-                period_from=period_from,
-                period_to=period_to,
-            )
-
-        async def _maintenance_count(session: AsyncSession) -> int:
-            return await MaintenanceRepository(
-                session, self._tenant_id
-            ).count_upcoming_alerts(days_ahead=30, truck_id=truck_id)
-
-        async def _active_trucks(session: AsyncSession) -> int:
-            return await TruckRepository(session, self._tenant_id).count_operational(
-                truck_id=truck_id,
-                driver_id=driver_id,
-                client_id=client_id,
-                competencia_mes=competencia_mes,
-                competencia_ano=competencia_ano,
-                period_from=period_from,
-                period_to=period_to,
-            )
-
-        async def _active_drivers(session: AsyncSession) -> int:
-            return await DriverRepository(session, self._tenant_id).count_active(
-                driver_id=driver_id,
-                truck_id=truck_id,
-                client_id=client_id,
-                competencia_mes=competencia_mes,
-                competencia_ano=competencia_ano,
-                period_from=period_from,
-                period_to=period_to,
-            )
-
-        (
-            truck_counts,
-            freight_counts,
-            cash_flow,
-            maintenance_alerts,
-            active_trucks,
-            active_drivers,
-        ) = await self._parallel_reads(
-            _truck_counts,
-            _freight_counts,
-            _cash_flow,
-            _maintenance_count,
-            _active_trucks,
-            _active_drivers,
+        truck_counts = await truck_repo.count_by_status()
+        freight_counts = await freight_repo.count_by_status(**freight_scope)
+        cash_flow = await finance_repo.get_cash_flow_summary(
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            truck_id=truck_id,
+            driver_id=driver_id,
+            client_id=client_id,
+            period_from=period_from,
+            period_to=period_to,
+        )
+        maintenance_alerts = await maintenance_repo.count_upcoming_alerts(
+            days_ahead=30, truck_id=truck_id
+        )
+        active_trucks = await truck_repo.count_operational(
+            truck_id=truck_id,
+            driver_id=driver_id,
+            client_id=client_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            period_from=period_from,
+            period_to=period_to,
+        )
+        active_drivers = await driver_repo.count_active(
+            driver_id=driver_id,
+            truck_id=truck_id,
+            client_id=client_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            period_from=period_from,
+            period_to=period_to,
         )
 
         fleet = FleetSummary(

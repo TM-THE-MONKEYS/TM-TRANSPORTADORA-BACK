@@ -88,7 +88,16 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         self, days_ahead: int = 30, truck_id: uuid.UUID | None = None
     ) -> int:
         """COUNT(*) de alertas agendados — evita carregar a lista completa."""
-        base = self._upcoming_alerts_query(days_ahead, truck_id)
-        count_q = select(func.count()).select_from(base.subquery())
-        result = await self._session.execute(count_q)
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
+        query = select(func.count(Maintenance.id)).where(
+            Maintenance.deleted_at.is_(None),
+            Maintenance.tenant_id == self._tenant_id,
+            Maintenance.status == MaintenanceStatus.AGENDADA,
+            Maintenance.data_prevista <= cutoff,
+        )
+        if truck_id is not None:
+            query = query.where(Maintenance.truck_id == truck_id)
+        result = await self._session.execute(query)
         return int(result.scalar_one() or 0)
