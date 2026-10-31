@@ -1,11 +1,17 @@
 """Dashboard service."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
+from typing import TypeVar
 
+import structlog
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.modules.dashboard.schemas import (
     DashboardKPIs,
@@ -25,6 +31,11 @@ from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException
+
+log = structlog.get_logger(__name__)
+
+_T = TypeVar("_T")
+_KPI_CACHE_TTL_SECONDS = 45
 
 
 class DashboardService:
@@ -48,6 +59,83 @@ class DashboardService:
                 "period_from não pode ser posterior a period_to."
             )
 
+    @staticmethod
+    def _filters_hash(
+        *,
+        branch_id: uuid.UUID | None,
+        client_id: uuid.UUID | None,
+        truck_id: uuid.UUID | None,
+        driver_id: uuid.UUID | None,
+        period_from: date | None,
+        period_to: date | None,
+    ) -> str:
+        payload = {
+            "branch_id": str(branch_id) if branch_id else None,
+            "client_id": str(client_id) if client_id else None,
+            "truck_id": str(truck_id) if truck_id else None,
+            "driver_id": str(driver_id) if driver_id else None,
+            "period_from": period_from.isoformat() if period_from else None,
+            "period_to": period_to.isoformat() if period_to else None,
+        }
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def _kpi_cache_key(
+        self,
+        *,
+        competencia_mes: int | None,
+        competencia_ano: int | None,
+        branch_id: uuid.UUID | None,
+        client_id: uuid.UUID | None,
+        truck_id: uuid.UUID | None,
+        driver_id: uuid.UUID | None,
+        period_from: date | None,
+        period_to: date | None,
+    ) -> str:
+        filters_hash = self._filters_hash(
+            branch_id=branch_id,
+            client_id=client_id,
+            truck_id=truck_id,
+            driver_id=driver_id,
+            period_from=period_from,
+            period_to=period_to,
+        )
+        return (
+            f"dash:kpis:{self._tenant_id}:"
+            f"{competencia_mes}:{competencia_ano}:{filters_hash}"
+        )
+
+    async def _parallel_reads(
+        self,
+        *jobs: Callable[[AsyncSession], Awaitable[_T]],
+    ) -> tuple[_T, ...]:
+        """Run independent reads in parallel.
+
+        AsyncSession is not concurrency-safe: each job gets a sibling session on
+        the same bind. SQLite StaticPool (tests) serializes to avoid connection
+        conflicts.
+        """
+        bind = self._session.get_bind()
+        if bind.dialect.name == "sqlite":
+            results: list[_T] = []
+            for job in jobs:
+                results.append(await job(self._session))
+            return tuple(results)
+
+        factory = async_sessionmaker(
+            bind=bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+
+        async def _run(job: Callable[[AsyncSession], Awaitable[_T]]) -> _T:
+            async with factory() as session:
+                return await job(session)
+
+        return tuple(await asyncio.gather(*(_run(job) for job in jobs)))
+
     async def _get_detailed_kpis(
         self,
         requesting_user: User,
@@ -67,12 +155,6 @@ class DashboardService:
         # (branches deferred). Isolamento já é por tenant_id.
         _ = branch_id
 
-        truck_repo = TruckRepository(self._session, self._tenant_id)
-        driver_repo = DriverRepository(self._session, self._tenant_id)
-        freight_repo = FreightRepository(self._session, self._tenant_id)
-        finance_repo = FinanceRepository(self._session, self._tenant_id)
-        maintenance_repo = MaintenanceRepository(self._session, self._tenant_id)
-
         freight_scope = {
             "client_id": client_id,
             "driver_id": driver_id,
@@ -83,38 +165,66 @@ class DashboardService:
             "period_to": period_to,
         }
 
-        truck_counts = await truck_repo.count_by_status()
-        freight_counts = await freight_repo.count_by_status(**freight_scope)
-        cash_flow = await finance_repo.get_cash_flow_summary(
-            competencia_mes=competencia_mes,
-            competencia_ano=competencia_ano,
-            truck_id=truck_id,
-            driver_id=driver_id,
-            client_id=client_id,
-            period_from=period_from,
-            period_to=period_to,
-        )
-        maintenance_alerts = await maintenance_repo.get_upcoming_alerts(
-            days_ahead=30, truck_id=truck_id
-        )
+        async def _truck_counts(session: AsyncSession) -> dict[str, int]:
+            return await TruckRepository(session, self._tenant_id).count_by_status()
 
-        active_trucks = await truck_repo.count_operational(
-            truck_id=truck_id,
-            driver_id=driver_id,
-            client_id=client_id,
-            competencia_mes=competencia_mes,
-            competencia_ano=competencia_ano,
-            period_from=period_from,
-            period_to=period_to,
-        )
-        active_drivers = await driver_repo.count_active(
-            driver_id=driver_id,
-            truck_id=truck_id,
-            client_id=client_id,
-            competencia_mes=competencia_mes,
-            competencia_ano=competencia_ano,
-            period_from=period_from,
-            period_to=period_to,
+        async def _freight_counts(session: AsyncSession) -> dict[str, int]:
+            return await FreightRepository(session, self._tenant_id).count_by_status(
+                **freight_scope
+            )
+
+        async def _cash_flow(session: AsyncSession) -> dict[str, float]:
+            return await FinanceRepository(session, self._tenant_id).get_cash_flow_summary(
+                competencia_mes=competencia_mes,
+                competencia_ano=competencia_ano,
+                truck_id=truck_id,
+                driver_id=driver_id,
+                client_id=client_id,
+                period_from=period_from,
+                period_to=period_to,
+            )
+
+        async def _maintenance_count(session: AsyncSession) -> int:
+            return await MaintenanceRepository(
+                session, self._tenant_id
+            ).count_upcoming_alerts(days_ahead=30, truck_id=truck_id)
+
+        async def _active_trucks(session: AsyncSession) -> int:
+            return await TruckRepository(session, self._tenant_id).count_operational(
+                truck_id=truck_id,
+                driver_id=driver_id,
+                client_id=client_id,
+                competencia_mes=competencia_mes,
+                competencia_ano=competencia_ano,
+                period_from=period_from,
+                period_to=period_to,
+            )
+
+        async def _active_drivers(session: AsyncSession) -> int:
+            return await DriverRepository(session, self._tenant_id).count_active(
+                driver_id=driver_id,
+                truck_id=truck_id,
+                client_id=client_id,
+                competencia_mes=competencia_mes,
+                competencia_ano=competencia_ano,
+                period_from=period_from,
+                period_to=period_to,
+            )
+
+        (
+            truck_counts,
+            freight_counts,
+            cash_flow,
+            maintenance_alerts,
+            active_trucks,
+            active_drivers,
+        ) = await self._parallel_reads(
+            _truck_counts,
+            _freight_counts,
+            _cash_flow,
+            _maintenance_count,
+            _active_trucks,
+            _active_drivers,
         )
 
         fleet = FleetSummary(
@@ -148,7 +258,7 @@ class DashboardService:
             freights=freights,
             finance=finance,
             active_drivers=active_drivers,
-            upcoming_maintenance_alerts=len(maintenance_alerts),
+            upcoming_maintenance_alerts=maintenance_alerts,
             active_trucks=active_trucks,
         )
 
@@ -166,6 +276,35 @@ class DashboardService:
         competencia_ano: int | None = None,
     ) -> DashboardKPIsFrontend:
         """Return flat KPIs matching the frontend DashboardKpis interface."""
+        self._check_access(requesting_user)
+        self._validate_period(period_from, period_to)
+
+        cache_key = self._kpi_cache_key(
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            branch_id=branch_id,
+            client_id=client_id,
+            truck_id=truck_id,
+            driver_id=driver_id,
+            period_from=period_from,
+            period_to=period_to,
+        )
+
+        try:
+            from app.core.database.redis import get_redis
+
+            redis = get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                log.debug("dashboard_kpis_cache_hit", cache_key=cache_key)
+                return DashboardKPIsFrontend.model_validate_json(cached)
+        except Exception:
+            log.warning(
+                "dashboard_kpis_cache_unavailable",
+                cache_key=cache_key,
+                exc_info=True,
+            )
+
         detailed = await self._get_detailed_kpis(
             requesting_user,
             branch_id=branch_id,
@@ -177,7 +316,25 @@ class DashboardService:
             competencia_mes=competencia_mes,
             competencia_ano=competencia_ano,
         )
-        return DashboardKPIsFrontend.from_detailed(detailed)
+        frontend = DashboardKPIsFrontend.from_detailed(detailed)
+
+        try:
+            from app.core.database.redis import get_redis
+
+            redis = get_redis()
+            await redis.setex(
+                cache_key,
+                _KPI_CACHE_TTL_SECONDS,
+                frontend.model_dump_json(),
+            )
+        except Exception:
+            log.warning(
+                "dashboard_kpis_cache_set_failed",
+                cache_key=cache_key,
+                exc_info=True,
+            )
+
+        return frontend
 
     async def get_freights_by_status(
         self,

@@ -354,3 +354,61 @@ async def test_list_freights_search_by_city_and_notes(
     unfiltered = await client.get("/api/v1/freights", headers=admin_headers)
     assert unfiltered.status_code == 200
     assert unfiltered.json()["total"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_freights_costs_summary_batch(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    admin_user: object,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    freight_a = await _create_freight(
+        client, admin_headers, db_session, test_tenant, valor=1000.0
+    )
+    freight_b = await _create_freight(
+        client, admin_headers, db_session, test_tenant, valor=2000.0
+    )
+
+    cost_a = await client.post(
+        f"/api/v1/freights/{freight_a}/costs",
+        json={"tipo": "pedagio", "valor": 50.0, "descricao": "A1"},
+        headers=admin_headers,
+    )
+    assert cost_a.status_code == 201
+    cost_a2 = await client.post(
+        f"/api/v1/freights/{freight_a}/costs",
+        json={"tipo": "outro", "valor": 25.5, "descricao": "A2"},
+        headers=admin_headers,
+    )
+    assert cost_a2.status_code == 201
+    cost_b = await client.post(
+        f"/api/v1/freights/{freight_b}/costs",
+        json={"tipo": "pedagio", "valor": 10.0, "descricao": "B1"},
+        headers=admin_headers,
+    )
+    assert cost_b.status_code == 201
+
+    response = await client.get(
+        f"/api/v1/freights/costs-summary?ids={freight_a},{freight_b}",
+        headers=admin_headers,
+    )
+    assert response.status_code == 200, response.text
+    items = {row["freight_id"]: row["total_costs"] for row in response.json()}
+    assert items[freight_a] == pytest.approx(75.5)
+    assert items[freight_b] == pytest.approx(10.0)
+
+    empty = await client.get(
+        f"/api/v1/freights/costs-summary?ids={uuid.uuid4()}",
+        headers=admin_headers,
+    )
+    assert empty.status_code == 200
+    assert empty.json() == []
+
+    too_many = ",".join(str(uuid.uuid4()) for _ in range(51))
+    over = await client.get(
+        f"/api/v1/freights/costs-summary?ids={too_many}",
+        headers=admin_headers,
+    )
+    assert over.status_code == 400

@@ -5,11 +5,13 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.drivers.models import Driver
 from app.modules.freights.models import Freight, FreightCost
 from app.modules.freights.repository import FreightRepository
+from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.tolls.models import TollCharge
 from app.modules.tolls.repository import TollRepository
 from app.modules.tolls.schemas import (
@@ -20,7 +22,6 @@ from app.modules.tolls.schemas import (
     TollChargeRead,
     TollFreightSummary,
 )
-from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.trucks.models import Truck
 from app.modules.users.models import User
 from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
@@ -78,12 +79,14 @@ class TollService:
                 "Pedágio só pode ser registrado em frete confirmado, em coleta ou em transporte"
             )
 
-    async def _enrich_read(self, charge: TollCharge) -> TollChargeRead:
+    def _enrich_read_with_maps(
+        self,
+        charge: TollCharge,
+        driver_names: dict[uuid.UUID, str],
+    ) -> TollChargeRead:
         driver_name: str | None = charge.driver_nome
-        if charge.driver_id:
-            driver = await self._session.get(Driver, charge.driver_id)
-            if driver:
-                driver_name = driver.nome
+        if charge.driver_id and charge.driver_id in driver_names:
+            driver_name = driver_names[charge.driver_id]
 
         return TollChargeRead(
             id=charge.id,
@@ -103,6 +106,28 @@ class TollService:
             freight_code=freight_code(charge.freight_id),
             driver_name=driver_name,
         )
+
+    async def _load_driver_names(
+        self, driver_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, str]:
+        if not driver_ids:
+            return {}
+        result = await self._session.execute(
+            select(Driver.id, Driver.nome).where(Driver.id.in_(driver_ids))
+        )
+        return {row.id: row.nome for row in result.all()}
+
+    async def _enrich_read(self, charge: TollCharge) -> TollChargeRead:
+        driver_ids = {charge.driver_id} if charge.driver_id else set()
+        driver_names = await self._load_driver_names(driver_ids)
+        return self._enrich_read_with_maps(charge, driver_names)
+
+    async def _enrich_reads(self, charges: list[TollCharge]) -> list[TollChargeRead]:
+        if not charges:
+            return []
+        driver_ids = {c.driver_id for c in charges if c.driver_id}
+        driver_names = await self._load_driver_names(driver_ids)
+        return [self._enrich_read_with_maps(c, driver_names) for c in charges]
 
     async def create(
         self, data: TollChargeCreate, author: User
@@ -217,7 +242,7 @@ class TollService:
             limit=params.size,
             offset=params.offset,
         )
-        reads = [await self._enrich_read(c) for c in items]
+        reads = await self._enrich_reads(items)
         return PagedResponse.create(reads, total, params)
 
     async def list_by_freight(
@@ -234,7 +259,7 @@ class TollService:
         items, total = await self._repo.list_by_freight(
             freight_id, limit=params.size, offset=params.offset
         )
-        reads = [await self._enrich_read(c) for c in items]
+        reads = await self._enrich_reads(items)
         return PagedResponse.create(reads, total, params)
 
     async def get_freight_summary(

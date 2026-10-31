@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.freights.models import Freight, FreightCost, FreightStop
 from app.modules.freights.repository import FreightRepository
-from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightStopCreate, FreightUpdate
+from app.modules.freights.schemas import (
+    FreightCostCreate,
+    FreightCostsSummaryItem,
+    FreightCreate,
+    FreightStopCreate,
+    FreightUpdate,
+)
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus, TruckStatus, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
@@ -478,6 +484,42 @@ class FreightService:
             raise NotFoundException("Frete não encontrado")
         await assert_freight_read_access(self._session, freight, requesting_user)
         return await self._repo.list_costs_by_freight(freight_id)
+
+    async def get_costs_summary(
+        self,
+        freight_ids: list[uuid.UUID],
+        requesting_user: User,
+    ) -> list[FreightCostsSummaryItem]:
+        """Batch SUM of FreightCost.valor for freights the user can read."""
+        if not freight_ids:
+            return []
+        if len(freight_ids) > 50:
+            raise BadRequestException("Máximo de 50 fretes por consulta")
+
+        seen: set[uuid.UUID] = set()
+        unique_ids: list[uuid.UUID] = []
+        for fid in freight_ids:
+            if fid not in seen:
+                seen.add(fid)
+                unique_ids.append(fid)
+
+        driver_filter = await resolve_freight_list_driver_filter(
+            self._session, requesting_user, None
+        )
+        accessible = await self._repo.filter_accessible_freight_ids(
+            unique_ids, driver_id=driver_filter
+        )
+        totals = await self._repo.sum_costs_by_freight_ids(
+            list(accessible), driver_id=driver_filter
+        )
+        return [
+            FreightCostsSummaryItem(
+                freight_id=fid,
+                total_costs=totals.get(fid, 0.0),
+            )
+            for fid in unique_ids
+            if fid in accessible
+        ]
 
     async def add_cost(self, freight_id: uuid.UUID, data: FreightCostCreate, added_by: User) -> FreightCost:
         self._check_write_access(added_by)

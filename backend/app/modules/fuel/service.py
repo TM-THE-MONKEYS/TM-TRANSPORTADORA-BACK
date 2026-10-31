@@ -24,7 +24,6 @@ from app.modules.fuel.schemas import (
 )
 from app.modules.notifications.service import NotificationService, freight_code
 from app.modules.trucks.models import Truck
-from app.modules.trucks.repository import TruckRepository
 from app.modules.users.models import User
 from app.shared.enums import ACTIVE_FREIGHT_STATUSES, UserRole
 from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
@@ -95,16 +94,18 @@ class FuelService:
             )
         truck.km_atual = km
 
-    async def _enrich_read(self, refill: FuelRefill) -> FuelRefillRead:
+    def _enrich_read_with_maps(
+        self,
+        refill: FuelRefill,
+        driver_names: dict[uuid.UUID, str],
+        truck_plates: dict[uuid.UUID, str],
+    ) -> FuelRefillRead:
         driver_name: str | None = refill.driver_nome
-        truck_plate: str | None = None
-        if refill.driver_id:
-            driver = await self._session.get(Driver, refill.driver_id)
-            if driver:
-                driver_name = driver.nome
-        if refill.truck_id:
-            truck = await self._session.get(Truck, refill.truck_id)
-            truck_plate = truck.placa if truck else None
+        if refill.driver_id and refill.driver_id in driver_names:
+            driver_name = driver_names[refill.driver_id]
+        truck_plate = (
+            truck_plates.get(refill.truck_id) if refill.truck_id else None
+        )
 
         valor_litro = refill.valor_litro
         if valor_litro is None and refill.litros > 0:
@@ -131,6 +132,46 @@ class FuelService:
             driver_name=driver_name,
             truck_plate=truck_plate,
         )
+
+    async def _load_driver_truck_maps(
+        self,
+        driver_ids: set[uuid.UUID],
+        truck_ids: set[uuid.UUID],
+    ) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str]]:
+        driver_names: dict[uuid.UUID, str] = {}
+        truck_plates: dict[uuid.UUID, str] = {}
+        if driver_ids:
+            result = await self._session.execute(
+                select(Driver.id, Driver.nome).where(Driver.id.in_(driver_ids))
+            )
+            driver_names = {row.id: row.nome for row in result.all()}
+        if truck_ids:
+            result = await self._session.execute(
+                select(Truck.id, Truck.placa).where(Truck.id.in_(truck_ids))
+            )
+            truck_plates = {row.id: row.placa for row in result.all()}
+        return driver_names, truck_plates
+
+    async def _enrich_read(self, refill: FuelRefill) -> FuelRefillRead:
+        driver_ids = {refill.driver_id} if refill.driver_id else set()
+        truck_ids = {refill.truck_id} if refill.truck_id else set()
+        driver_names, truck_plates = await self._load_driver_truck_maps(
+            driver_ids, truck_ids
+        )
+        return self._enrich_read_with_maps(refill, driver_names, truck_plates)
+
+    async def _enrich_reads(self, refills: list[FuelRefill]) -> list[FuelRefillRead]:
+        if not refills:
+            return []
+        driver_ids = {r.driver_id for r in refills if r.driver_id}
+        truck_ids = {r.truck_id for r in refills if r.truck_id}
+        driver_names, truck_plates = await self._load_driver_truck_maps(
+            driver_ids, truck_ids
+        )
+        return [
+            self._enrich_read_with_maps(r, driver_names, truck_plates)
+            for r in refills
+        ]
 
     async def create(
         self, data: FuelRefillCreate, author: User
@@ -344,7 +385,7 @@ class FuelService:
             competencia_mes=competencia_mes,
             competencia_ano=competencia_ano,
         )
-        reads = [await self._enrich_read(r) for r in items]
+        reads = await self._enrich_reads(items)
         return PagedResponse.create(reads, total, params)
 
     async def list_by_freight(
@@ -361,7 +402,7 @@ class FuelService:
         items, total = await self._repo.list_by_freight(
             freight_id, limit=params.size, offset=params.offset
         )
-        reads = [await self._enrich_read(r) for r in items]
+        reads = await self._enrich_reads(items)
         return PagedResponse.create(reads, total, params)
 
     async def get_freight_summary(

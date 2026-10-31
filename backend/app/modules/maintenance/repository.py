@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import extract, or_, select
+from sqlalchemy import extract, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from app.modules.maintenance.models import Maintenance
 from app.shared.base_repository import TenantBaseRepository
@@ -60,10 +61,11 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         )
         return list(result.scalars().all()), total
 
-    async def get_upcoming_alerts(
+    def _upcoming_alerts_query(
         self, days_ahead: int = 30, truck_id: uuid.UUID | None = None
-    ) -> list[Maintenance]:
+    ) -> Select[tuple[Maintenance]]:
         from datetime import timedelta
+
         cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
         query = select(Maintenance).where(
             Maintenance.deleted_at.is_(None),
@@ -73,5 +75,20 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         )
         if truck_id is not None:
             query = query.where(Maintenance.truck_id == truck_id)
+        return query
+
+    async def get_upcoming_alerts(
+        self, days_ahead: int = 30, truck_id: uuid.UUID | None = None
+    ) -> list[Maintenance]:
+        query = self._upcoming_alerts_query(days_ahead, truck_id)
         result = await self._session.execute(query.order_by(Maintenance.data_prevista))
         return list(result.scalars().all())
+
+    async def count_upcoming_alerts(
+        self, days_ahead: int = 30, truck_id: uuid.UUID | None = None
+    ) -> int:
+        """COUNT(*) de alertas agendados — evita carregar a lista completa."""
+        base = self._upcoming_alerts_query(days_ahead, truck_id)
+        count_q = select(func.count()).select_from(base.subquery())
+        result = await self._session.execute(count_q)
+        return int(result.scalar_one() or 0)
