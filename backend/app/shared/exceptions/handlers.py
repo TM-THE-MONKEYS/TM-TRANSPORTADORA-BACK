@@ -134,11 +134,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def sqlalchemy_exception_handler(
         request: Request, exc: SQLAlchemyError
     ) -> JSONResponse:
+        exc_message = str(exc.__cause__ or exc)
+        # Mensagem no event name: LOG_FORMAT do Railway às vezes omite campos.
         log.exception(
-            "database_error",
-            exc_type=type(exc).__name__,
-            exc_message=str(exc.__cause__ or exc),
-            path=request.url.path,
+            f"database_error path={request.url.path} type={type(exc).__name__} msg={exc_message}"
         )
         detail = "Banco de dados indisponível. Verifique DATABASE_URL no .env do backend."
         return _error_response(
