@@ -5,7 +5,7 @@ import uuid
 from datetime import date
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.drivers.models import Driver
@@ -77,8 +77,10 @@ class DriverRepository(TenantBaseRepository[Driver]):
                 )
             )
         total = await self._count(query)
+        # Ativos primeiro; demais por nome (cadastro completo, sem filtro de mês)
+        status_rank = case((Driver.status == DriverStatus.ATIVO, 0), else_=1)
         result = await self._session.execute(
-            query.order_by(Driver.nome).offset(params.offset).limit(params.limit)
+            query.order_by(status_rank, Driver.nome).offset(params.offset).limit(params.limit)
         )
         return list(result.scalars().all()), total
 
