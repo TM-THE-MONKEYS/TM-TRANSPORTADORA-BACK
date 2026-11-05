@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,13 +28,17 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
         competencia_mes: int | None = None,
         competencia_ano: int | None = None,
     ) -> tuple[list[FuelRefill], int]:
-        from datetime import datetime, timezone
+        from datetime import datetime
         from zoneinfo import ZoneInfo
 
         base = (
             select(FuelRefill)
             .join(Freight, FuelRefill.freight_id == Freight.id)
-            .where(Freight.deleted_at.is_(None), FuelRefill.tenant_id == self._tenant_id)
+            .where(
+                Freight.deleted_at.is_(None),
+                FuelRefill.deleted_at.is_(None),
+                FuelRefill.tenant_id == self._tenant_id,
+            )
         )
         if driver_id is not None:
             base = base.where(FuelRefill.driver_id == driver_id)
@@ -44,8 +49,8 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
                 end = datetime(competencia_ano + 1, 1, 1, tzinfo=tz)
             else:
                 end = datetime(competencia_ano, competencia_mes + 1, 1, tzinfo=tz)
-            start_utc = start.astimezone(timezone.utc)
-            end_utc = end.astimezone(timezone.utc)
+            start_utc = start.astimezone(UTC)
+            end_utc = end.astimezone(UTC)
             base = base.where(
                 FuelRefill.data_abastecimento >= start_utc,
                 FuelRefill.data_abastecimento < end_utc,
@@ -71,6 +76,7 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
         base = select(FuelRefill).where(
             FuelRefill.freight_id == freight_id,
             FuelRefill.tenant_id == self._tenant_id,
+            FuelRefill.deleted_at.is_(None),
         )
         count_q = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_q)).scalar_one()
@@ -91,6 +97,7 @@ class FuelRepository(TenantBaseRepository[FuelRefill]):
             ).where(
                 FuelRefill.freight_id == freight_id,
                 FuelRefill.tenant_id == self._tenant_id,
+                FuelRefill.deleted_at.is_(None),
             )
         )
         row = result.one()

@@ -28,7 +28,11 @@ class TollRepository(TenantBaseRepository[TollCharge]):
         base = (
             select(TollCharge)
             .join(Freight, TollCharge.freight_id == Freight.id)
-            .where(Freight.deleted_at.is_(None), TollCharge.tenant_id == self._tenant_id)
+            .where(
+                Freight.deleted_at.is_(None),
+                TollCharge.deleted_at.is_(None),
+                TollCharge.tenant_id == self._tenant_id,
+            )
         )
         if driver_id is not None:
             base = base.where(TollCharge.driver_id == driver_id)
@@ -51,6 +55,7 @@ class TollRepository(TenantBaseRepository[TollCharge]):
         base = select(TollCharge).where(
             TollCharge.freight_id == freight_id,
             TollCharge.tenant_id == self._tenant_id,
+            TollCharge.deleted_at.is_(None),
         )
         count_q = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_q)).scalar_one()
@@ -69,6 +74,7 @@ class TollRepository(TenantBaseRepository[TollCharge]):
             ).where(
                 TollCharge.freight_id == freight_id,
                 TollCharge.tenant_id == self._tenant_id,
+                TollCharge.deleted_at.is_(None),
             )
         )
         row = result.one()

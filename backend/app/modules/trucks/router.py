@@ -17,6 +17,7 @@ from app.modules.trucks.implement_schemas import (
 )
 from app.modules.trucks.implement_service import TruckImplementService
 from app.modules.trucks.schemas import (
+    TruckConsumptionRead,
     TruckCreate,
     TruckFrontendListItem,
     TruckFrontendRead,
@@ -66,6 +67,16 @@ async def get_truck(
     service = TruckService(db, current_user.tenant_id)
     truck = await service.get_by_id(truck_id, current_user)
     return TruckFrontendRead.from_orm(truck)
+
+
+@router.get("/{truck_id}/consumption", response_model=TruckConsumptionRead)
+async def get_truck_consumption(
+    truck_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> TruckConsumptionRead:
+    service = TruckService(db, current_user.tenant_id)
+    return await service.get_consumption(truck_id, current_user)
 
 
 @router.patch("/{truck_id}", response_model=TruckFrontendRead)

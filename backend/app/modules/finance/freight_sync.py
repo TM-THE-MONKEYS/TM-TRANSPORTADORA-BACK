@@ -13,10 +13,10 @@ from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
 from app.modules.freights.models import Freight, FreightCost
 from app.modules.fuel.models import FuelRefill
-from app.modules.tolls.models import TollCharge
 from app.modules.notifications.service import freight_code
+from app.modules.tolls.models import TollCharge
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType, FreightStatus
-from app.shared.utils.dates import today_sp, to_sp_calendar_date
+from app.shared.utils.dates import to_sp_calendar_date, today_sp
 
 SOURCE_REVENUE = "freight_revenue:"
 SOURCE_FUEL = "fuel_refill:"
@@ -195,7 +195,10 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
     # Custos criados pelo fluxo de abastecimento — espelho é fuel_refill:*
     if "COMBUST" in tipo_norm:
         linked = await session.execute(
-            select(FuelRefill.id).where(FuelRefill.freight_cost_id == cost.id).limit(1)
+            select(FuelRefill.id).where(
+                FuelRefill.freight_cost_id == cost.id,
+                FuelRefill.deleted_at.is_(None),
+            ).limit(1)
         )
         if linked.scalar_one_or_none():
             return None
@@ -203,7 +206,10 @@ async def create_cost_expense(session: AsyncSession, cost: FreightCost) -> Finan
     # Custos criados pelo fluxo de pedágio operacional — espelho é toll_charge:*
     if "PEDAGIO" in tipo_norm:
         linked_toll = await session.execute(
-            select(TollCharge.id).where(TollCharge.freight_cost_id == cost.id).limit(1)
+            select(TollCharge.id).where(
+                TollCharge.freight_cost_id == cost.id,
+                TollCharge.deleted_at.is_(None),
+            ).limit(1)
         )
         if linked_toll.scalar_one_or_none():
             return None
@@ -333,7 +339,10 @@ async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) ->
 
     refills = (
         await session.execute(
-            select(FuelRefill).where(FuelRefill.tenant_id == tenant_id)
+            select(FuelRefill).where(
+                FuelRefill.tenant_id == tenant_id,
+                FuelRefill.deleted_at.is_(None),
+            )
         )
     ).scalars().all()
     for refill in refills:
@@ -343,7 +352,10 @@ async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) ->
 
     tolls = (
         await session.execute(
-            select(TollCharge).where(TollCharge.tenant_id == tenant_id)
+            select(TollCharge).where(
+                TollCharge.tenant_id == tenant_id,
+                TollCharge.deleted_at.is_(None),
+            )
         )
     ).scalars().all()
     for charge in tolls:
@@ -353,7 +365,10 @@ async def sync_all_from_freights(session: AsyncSession, tenant_id: uuid.UUID) ->
 
     costs = (
         await session.execute(
-            select(FreightCost).where(FreightCost.tenant_id == tenant_id)
+            select(FreightCost).where(
+                FreightCost.tenant_id == tenant_id,
+                FreightCost.deleted_at.is_(None),
+            )
         )
     ).scalars().all()
     for cost in costs:

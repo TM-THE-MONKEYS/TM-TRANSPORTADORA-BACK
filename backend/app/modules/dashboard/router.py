@@ -1,6 +1,7 @@
 """Dashboard routes."""
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -23,9 +24,21 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_dashboard_kpis(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    competencia_mes: int | None = Query(default=None, ge=1, le=12),
+    competencia_ano: int | None = Query(default=None, ge=2000, le=2100),
+    driver_id: uuid.UUID | None = Query(default=None),
+    truck_id: uuid.UUID | None = Query(default=None),
+    client_id: uuid.UUID | None = Query(default=None),
 ) -> DashboardKPIsFrontend:
     service = DashboardService(db, current_user.tenant_id)
-    return await service.get_kpis(current_user)
+    return await service.get_kpis(
+        current_user,
+        competencia_mes=competencia_mes,
+        competencia_ano=competencia_ano,
+        driver_id=driver_id,
+        truck_id=truck_id,
+        client_id=client_id,
+    )
 
 
 @router.get("/freights-by-status", response_model=list[FreightStatusCount])

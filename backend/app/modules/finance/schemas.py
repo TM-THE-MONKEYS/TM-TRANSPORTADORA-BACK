@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.shared.enums import FinanceEntryStatus, FinanceEntryType
+from app.shared.enums import FinanceEntryStatus, FinanceEntryType, PaymentMethod
 from app.shared.utils.data_normalization import (
     FINANCE_CREATE_RULES,
     FINANCE_UPDATE_RULES,
@@ -26,13 +26,14 @@ class FinanceEntryCreate(BaseModel):
     data_pagamento: date | None = None
     status: FinanceEntryStatus = FinanceEntryStatus.PENDENTE
     observacoes: str | None = None
+    forma_pagamento: PaymentMethod | None = None
 
     @model_validator(mode="before")
     @classmethod
     def normalize_payload(cls, data: object) -> object:
         return normalize_create_payload(
             data,
-            {},
+            {"paymentMethod": "forma_pagamento", "payment_method": "forma_pagamento"},
             required=(("categoria", "Categoria"), ("descricao", "Descrição")),
             field_rules=FINANCE_CREATE_RULES,
         )
@@ -56,11 +57,16 @@ class FinanceEntryUpdate(BaseModel):
     data_pagamento: date | None = None
     status: FinanceEntryStatus | None = None
     observacoes: str | None = None
+    forma_pagamento: PaymentMethod | None = None
 
     @model_validator(mode="before")
     @classmethod
     def normalize_payload(cls, data: object) -> object:
-        return normalize_update_payload(data, {}, field_rules=FINANCE_UPDATE_RULES)
+        return normalize_update_payload(
+            data,
+            {"paymentMethod": "forma_pagamento", "payment_method": "forma_pagamento"},
+            field_rules=FINANCE_UPDATE_RULES,
+        )
 
     @field_validator("valor", mode="before")
     @classmethod
@@ -86,6 +92,7 @@ class FinanceEntryRead(BaseModel):
     data_pagamento: date | None
     status: FinanceEntryStatus
     observacoes: str | None
+    forma_pagamento: PaymentMethod | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -102,6 +109,7 @@ class FinanceEntryListResponse(BaseModel):
     status: FinanceEntryStatus
     data_vencimento: date | None
     observacoes: str | None = None
+    forma_pagamento: PaymentMethod | None = None
     created_at: datetime
 
 
@@ -113,3 +121,15 @@ class CashFlowResponse(BaseModel):
     despesas_pendentes: float
     receitas_pagas: float
     despesas_pagas: float
+
+
+class ClientReceiptTimeItem(BaseModel):
+    client_id: uuid.UUID
+    client_name: str
+    entries_count: int
+    avg_days_to_receipt: float
+
+
+class ReasonCountItem(BaseModel):
+    reason: str
+    count: int

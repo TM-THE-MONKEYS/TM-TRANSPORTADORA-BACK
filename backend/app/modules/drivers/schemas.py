@@ -216,3 +216,25 @@ class DriverFrontendListItem(BaseModel):
             ),
             created_at=driver.created_at.isoformat(),  # type: ignore[attr-defined]
         )
+
+
+class DriverCnhAlertRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    cnh_number: str
+    cnh_expires_at: date
+    days_to_expiry: int
+    expired: bool
+
+    @classmethod
+    def from_orm(cls, driver: object, *, today: date) -> "DriverCnhAlertRead":
+        expiry = driver.cnh_expiry  # type: ignore[attr-defined]
+        days = (expiry - today).days
+        return cls(
+            id=driver.id,  # type: ignore[attr-defined]
+            name=driver.nome,  # type: ignore[attr-defined]
+            cnh_number=driver.cnh,  # type: ignore[attr-defined]
+            cnh_expires_at=expiry,
+            days_to_expiry=days,
+            expired=days < 0,
+        )

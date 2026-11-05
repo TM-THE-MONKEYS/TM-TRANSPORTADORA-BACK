@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-
 # ── Internal detailed schemas (used by service layer) ───────────────────────
 
 class FleetSummary(BaseModel):
@@ -38,6 +37,9 @@ class DashboardKPIs(BaseModel):
     finance: FinanceSummary
     active_drivers: int
     upcoming_maintenance_alerts: int
+    cnh_alerts: int = 0
+    on_time_deliveries: int = 0
+    deliveries_with_deadline: int = 0
 
 
 # ── Frontend-compatible flat schema (matches Next.js DashboardKpis type) ────
@@ -52,9 +54,12 @@ class DashboardKPIsFrontend(BaseModel):
     operational_costs_brl: float
     maintenance_alerts: int
     financial_pending: float
+    on_time_deliveries: int = 0
+    deliveries_with_deadline: int = 0
+    cnh_alerts: int = 0
 
     @classmethod
-    def from_detailed(cls, kpis: DashboardKPIs) -> "DashboardKPIsFrontend":
+    def from_detailed(cls, kpis: DashboardKPIs) -> DashboardKPIsFrontend:
         return cls(
             freights_in_progress=(
                 kpis.freights.confirmado
@@ -69,6 +74,9 @@ class DashboardKPIsFrontend(BaseModel):
             financial_pending=(
                 kpis.finance.receitas_pendentes + kpis.finance.despesas_pendentes
             ),
+            on_time_deliveries=kpis.on_time_deliveries,
+            deliveries_with_deadline=kpis.deliveries_with_deadline,
+            cnh_alerts=kpis.cnh_alerts,
         )
 
 

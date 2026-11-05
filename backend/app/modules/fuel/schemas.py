@@ -25,6 +25,8 @@ FUEL_FIELD_ALIASES: dict[str, str] = {
     "price_per_liter": "valor_litro",
     "currentKm": "km_atual",
     "km": "km_atual",
+    "fullTank": "tanque_cheio",
+    "full_tank": "tanque_cheio",
     "gasStation": "posto",
     "station": "posto",
     "city": "cidade",
@@ -43,6 +45,7 @@ class FuelRefillCreate(BaseModel):
     valor_total: float = Field(gt=0)
     valor_litro: float | None = Field(default=None, gt=0)
     km_atual: float | None = Field(default=None, ge=0)
+    tanque_cheio: bool = False
     posto: str | None = Field(default=None, max_length=150)
     cidade: str | None = Field(default=None, max_length=100)
     estado: str | None = Field(default=None, max_length=2)
@@ -75,6 +78,7 @@ class FuelRefillUpdate(BaseModel):
     valor_total: float | None = Field(default=None, gt=0)
     valor_litro: float | None = Field(default=None, gt=0)
     km_atual: float | None = Field(default=None, ge=0)
+    tanque_cheio: bool | None = None
     posto: str | None = Field(default=None, max_length=150)
     cidade: str | None = Field(default=None, max_length=100)
     estado: str | None = Field(default=None, max_length=2)
@@ -110,6 +114,7 @@ class FuelRefillRead(BaseModel):
     valor_total: float
     valor_litro: float | None
     km_atual: float | None
+    tanque_cheio: bool = False
     posto: str | None
     cidade: str | None
     estado: str | None

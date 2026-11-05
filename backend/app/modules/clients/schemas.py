@@ -40,15 +40,25 @@ class ClientCreate(BaseModel):
     telefone: str | None = Field(default=None, max_length=20)
     endereco: AddressSchema | None = None
     observacoes: str | None = None
+    prazo_pagamento_dias: int | None = Field(default=None, ge=0, le=365)
 
     @model_validator(mode="before")
     @classmethod
     def normalize_payload(cls, data: object) -> object:
         return normalize_create_payload(
             data,
-            {},
+            {
+                "paymentTermDays": "prazo_pagamento_dias",
+                "prazo_pagamento": "prazo_pagamento_dias",
+            },
             required=(("nome", "Nome"), ("cpf_cnpj", "CPF/CNPJ")),
-            optional_nullable=("email", "telefone", "endereco", "observacoes"),
+            optional_nullable=(
+                "email",
+                "telefone",
+                "endereco",
+                "observacoes",
+                "prazo_pagamento_dias",
+            ),
             field_rules=CLIENT_CREATE_RULES,
             nested_rules={"endereco": ADDRESS_RULES},
         )
@@ -67,6 +77,7 @@ class ClientUpdate(BaseModel):
     telefone: str | None = None
     endereco: AddressSchema | None = None
     observacoes: str | None = None
+    prazo_pagamento_dias: int | None = Field(default=None, ge=0, le=365)
     is_active: bool | None = None
 
     @model_validator(mode="before")
@@ -74,7 +85,10 @@ class ClientUpdate(BaseModel):
     def normalize_payload(cls, data: object) -> object:
         return normalize_update_payload(
             data,
-            {},
+            {
+                "paymentTermDays": "prazo_pagamento_dias",
+                "prazo_pagamento": "prazo_pagamento_dias",
+            },
             field_rules=CLIENT_UPDATE_RULES,
             nested_rules={"endereco": ADDRESS_RULES},
         )
@@ -90,6 +104,7 @@ class ClientRead(BaseModel):
     telefone: str | None
     endereco: dict | None
     observacoes: str | None
+    prazo_pagamento_dias: int | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -103,5 +118,6 @@ class ClientListResponse(BaseModel):
     cpf_cnpj: str
     email: str | None
     telefone: str | None
+    prazo_pagamento_dias: int | None = None
     is_active: bool
     created_at: datetime

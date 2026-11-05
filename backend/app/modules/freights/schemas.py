@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.shared.enums import FreightStatus
+from app.shared.enums import CancelReason, DelayReason, FreightStatus
 from app.shared.utils.data_normalization import (
     ADDRESS_RULES,
     FREIGHT_COST_RULES,
@@ -16,7 +16,10 @@ from app.shared.utils.data_normalization import (
     parse_decimal_br,
 )
 from app.shared.utils.dates import deadline_input_to_utc, format_date_only_iso
-from app.shared.utils.field_aliases import normalize_create_payload, normalize_update_payload
+from app.shared.utils.field_aliases import (
+    normalize_create_payload,
+    normalize_update_payload,
+)
 
 
 class AddressPoint(BaseModel):
@@ -65,7 +68,7 @@ class FreightStopRead(BaseModel):
     weight_kg: float | None = None
 
     @classmethod
-    def from_orm(cls, stop: object) -> "FreightStopRead":
+    def from_orm(cls, stop: object) -> FreightStopRead:
         return cls(
             id=stop.id,  # type: ignore[attr-defined]
             sequence=stop.sequence,  # type: ignore[attr-defined]
@@ -150,7 +153,7 @@ class FreightCreate(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_paradas(self) -> "FreightCreate":
+    def validate_paradas(self) -> FreightCreate:
         if len(self.paradas) > 20:
             raise ValueError("Máximo de 20 paradas intermediárias por frete")
         ordens = [p.ordem for p in self.paradas]
@@ -213,8 +216,13 @@ class FreightRead(BaseModel):
     data_coleta: datetime | None
     data_entrega_prevista: datetime | None
     data_entrega_real: datetime | None
+    data_entrega_real_origem: str | None = None
+    coletado_em: datetime | None = None
     distancia_km: float | None
     observacoes: str | None
+    motivo_cancelamento: str | None = None
+    motivo_cancelamento_detalhe: str | None = None
+    motivo_atraso: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -234,6 +242,9 @@ class FreightListResponse(BaseModel):
 
 class FreightStatusUpdate(BaseModel):
     status: FreightStatus
+    motivo_cancelamento: CancelReason | None = None
+    motivo_cancelamento_detalhe: str | None = Field(default=None, max_length=500)
+    motivo_atraso: DelayReason | None = None
 
 
 # ── Frontend-compatible schemas ──────────────────────────────────────────────
@@ -264,6 +275,9 @@ class FreightFrontendRead(BaseModel):
     freight_type: str = "carga_geral"
     status: FreightStatus
     deadline_at: str | None = None
+    coletado_em: str | None = None
+    delivered_at: str | None = None
+    delivery_real_origin: str | None = None
     responsible_id: str | None = None
     truck_id: uuid.UUID | None = None
     driver_id: uuid.UUID | None = None
@@ -271,12 +285,18 @@ class FreightFrontendRead(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, freight: object) -> "FreightFrontendRead":
+    def from_orm(cls, freight: object) -> FreightFrontendRead:
         origem = freight.origem or {}  # type: ignore[attr-defined]
         destino = freight.destino or {}  # type: ignore[attr-defined]
         code = f"OF-{str(freight.id)[:8].upper()}"  # type: ignore[attr-defined]
         deadline = freight.data_entrega_prevista  # type: ignore[attr-defined]
-        stops_raw = getattr(freight, "stops", None) or []
+        collected = freight.coletado_em  # type: ignore[attr-defined]
+        delivered = freight.data_entrega_real  # type: ignore[attr-defined]
+        stops_raw = [
+            stop
+            for stop in (getattr(freight, "stops", None) or [])
+            if getattr(stop, "deleted_at", None) is None
+        ]
         stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
         return cls(
             id=freight.id,  # type: ignore[attr-defined]
@@ -297,6 +317,9 @@ class FreightFrontendRead(BaseModel):
             value_brl=freight.valor_frete,  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
             deadline_at=format_date_only_iso(deadline),
+            coletado_em=collected.isoformat() if collected else None,
+            delivered_at=delivered.isoformat() if delivered else None,
+            delivery_real_origin=freight.data_entrega_real_origem,  # type: ignore[attr-defined]
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
             driver_id=freight.driver_id,  # type: ignore[attr-defined]
             created_at=freight.created_at.isoformat(),  # type: ignore[attr-defined]
@@ -332,10 +355,14 @@ class FreightFrontendListItem(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, freight: object) -> "FreightFrontendListItem":
+    def from_orm(cls, freight: object) -> FreightFrontendListItem:
         origem = freight.origem or {}  # type: ignore[attr-defined]
         destino = freight.destino or {}  # type: ignore[attr-defined]
-        stops_raw = getattr(freight, "stops", None) or []
+        stops_raw = [
+            stop
+            for stop in (getattr(freight, "stops", None) or [])
+            if getattr(stop, "deleted_at", None) is None
+        ]
         stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
         return cls(
             id=freight.id,  # type: ignore[attr-defined]

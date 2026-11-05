@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     upload_max_bytes: int = 5 * 1024 * 1024
 
+    # Seed local. Vazio de propósito: sem estas variáveis o script não cria usuário.
+    seed_admin_email: str = ""
+    seed_admin_password: str = ""
+
+    # Alerta de manutenção por km: dispara quando km_atual >= km_proxima - margem.
+    maintenance_km_alert_margin: int = 500
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:

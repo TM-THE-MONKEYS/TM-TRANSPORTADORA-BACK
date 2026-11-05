@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel, TenantMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
 from app.shared.enums import TrackingStatus
 
 
-class TrackingUpdate(TenantMixin, BaseModel):
+class TrackingUpdate(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_tracking_updates"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
@@ -29,7 +29,7 @@ class TrackingUpdate(TenantMixin, BaseModel):
     evento_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
-    freight: Mapped["Freight"] = relationship(back_populates="tracking_updates")  # type: ignore[name-defined]  # noqa: F821
+    freight: Mapped[Freight] = relationship(back_populates="tracking_updates")  # type: ignore[name-defined]  # noqa: F821

@@ -32,17 +32,41 @@ def check_maintenance_alerts(self) -> dict[str, int]:  # type: ignore[no-untyped
         from app.modules.maintenance.models import Maintenance
         from app.shared.enums import MaintenanceStatus
 
+        from sqlalchemy import or_
+        from sqlalchemy.orm import aliased
+
+        from app.core.config.settings import get_settings
+        from app.modules.trucks.models import Truck
+
         cutoff = datetime.now(timezone.utc) + timedelta(days=7)
+        margin = get_settings().maintenance_km_alert_margin
+        truck = aliased(Truck)
         async with AsyncSessionLocal() as session:
+            by_date = (
+                Maintenance.deleted_at.is_(None)
+                & (Maintenance.status == MaintenanceStatus.AGENDADA)
+                & (Maintenance.data_prevista.isnot(None))
+                & (Maintenance.data_prevista <= cutoff)
+            )
+            by_km = (
+                Maintenance.deleted_at.is_(None)
+                & (Maintenance.status == MaintenanceStatus.AGENDADA)
+                & Maintenance.km_proxima.isnot(None)
+                & truck.deleted_at.is_(None)
+                & (truck.km_atual >= Maintenance.km_proxima - margin)
+            )
             result = await session.execute(
-                select(func.count(Maintenance.id)).where(
-                    Maintenance.deleted_at.is_(None),
-                    Maintenance.status == MaintenanceStatus.AGENDADA,
-                    Maintenance.data_prevista <= cutoff,
-                )
+                select(func.count(func.distinct(Maintenance.id)))
+                .select_from(Maintenance)
+                .outerjoin(truck, truck.id == Maintenance.truck_id)
+                .where(or_(by_date, by_km))
             )
             count = result.scalar_one()
-            log.info("maintenance_alerts_checked", count=count)
+            log.info(
+                "maintenance_alerts_checked",
+                count=count,
+                km_margin=margin,
+            )
             return {"alerts_count": count}
 
     try:

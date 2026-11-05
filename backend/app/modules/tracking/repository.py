@@ -25,6 +25,7 @@ class TrackingRepository(TenantBaseRepository[TrackingUpdate]):
             .where(
                 TrackingUpdate.freight_id == freight_id,
                 TrackingUpdate.tenant_id == self._tenant_id,
+                TrackingUpdate.deleted_at.is_(None),
             )
             .order_by(TrackingUpdate.evento_at.asc())
         )
@@ -36,6 +37,7 @@ class TrackingRepository(TenantBaseRepository[TrackingUpdate]):
             .where(
                 TrackingUpdate.freight_id == freight_id,
                 TrackingUpdate.tenant_id == self._tenant_id,
+                TrackingUpdate.deleted_at.is_(None),
             )
             .order_by(TrackingUpdate.evento_at.desc())
             .limit(1)

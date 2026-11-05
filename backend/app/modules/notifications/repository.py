@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications.models import FreightNotification, NotificationRead
@@ -20,7 +20,10 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
     def _base_query(self) -> Select:
         return (
             select(FreightNotification)
-            .where(FreightNotification.tenant_id == self._tenant_id)
+            .where(
+                FreightNotification.tenant_id == self._tenant_id,
+                FreightNotification.deleted_at.is_(None),
+            )
             .order_by(FreightNotification.created_at.desc())
         )
 
@@ -29,6 +32,7 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
             select(FreightNotification).where(
                 FreightNotification.id == notification_id,
                 FreightNotification.tenant_id == self._tenant_id,
+                FreightNotification.deleted_at.is_(None),
             )
         )
         return result.scalar_one_or_none()
@@ -40,6 +44,7 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
             select(NotificationRead).where(
                 NotificationRead.notification_id == notification_id,
                 NotificationRead.user_id == user_id,
+                NotificationRead.deleted_at.is_(None),
             )
         )
         if existing.scalar_one_or_none():
@@ -48,7 +53,7 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
         read = NotificationRead(
             notification_id=notification_id,
             user_id=user_id,
-            read_at=datetime.now(timezone.utc),
+            read_at=datetime.now(UTC),
             tenant_id=self._tenant_id,
         )
         self._session.add(read)
@@ -57,7 +62,7 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
 
     async def mark_all_read(self, user_id: uuid.UUID) -> int:
         unread_ids = await self._get_unread_ids(user_id)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for nid in unread_ids:
             self._session.add(
                 NotificationRead(
@@ -79,17 +84,20 @@ class NotificationRepository(TenantBaseRepository[FreightNotification]):
             select(NotificationRead.notification_id).where(
                 NotificationRead.user_id == user_id,
                 NotificationRead.notification_id.in_(notification_ids),
+                NotificationRead.deleted_at.is_(None),
             )
         )
         return {row[0] for row in result.all()}
 
     async def _get_unread_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         read_ids = select(NotificationRead.notification_id).where(
-            NotificationRead.user_id == user_id
+            NotificationRead.user_id == user_id,
+            NotificationRead.deleted_at.is_(None),
         )
         result = await self._session.execute(
             select(FreightNotification.id).where(
                 FreightNotification.tenant_id == self._tenant_id,
+                FreightNotification.deleted_at.is_(None),
                 ~FreightNotification.id.in_(read_ids),
             )
         )

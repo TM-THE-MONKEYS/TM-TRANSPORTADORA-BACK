@@ -4,17 +4,28 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel, TenantMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
+
+_ACTIVE_COST = "freight_cost_id IS NOT NULL AND deleted_at IS NULL"
 
 
-class FuelRefill(TenantMixin, BaseModel):
+class FuelRefill(TenantMixin, SoftDeleteMixin, BaseModel):
     """Registro de abastecimento vinculado ao frete e motorista em viagem."""
 
     __tablename__ = "tm_fuel_refills"
+    __table_args__ = (
+        Index(
+            "uq_tm_fuel_refills_freight_cost_active",
+            "freight_cost_id",
+            unique=True,
+            sqlite_where=text(_ACTIVE_COST),
+            postgresql_where=text(_ACTIVE_COST),
+        ),
+    )
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -45,12 +56,12 @@ class FuelRefill(TenantMixin, BaseModel):
         UUID(as_uuid=True),
         ForeignKey("tm_freight_costs.id", ondelete="SET NULL"),
         nullable=True,
-        unique=True,
     )
     litros: Mapped[float] = mapped_column(Float, nullable=False)
     valor_total: Mapped[float] = mapped_column(Float, nullable=False)
     valor_litro: Mapped[float | None] = mapped_column(Float, nullable=True)
     km_atual: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tanque_cheio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     posto: Mapped[str | None] = mapped_column(String(150), nullable=True)
     cidade: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estado: Mapped[str | None] = mapped_column(String(2), nullable=True)
@@ -59,6 +70,6 @@ class FuelRefill(TenantMixin, BaseModel):
         DateTime(timezone=True), nullable=False, index=True
     )
 
-    freight: Mapped["Freight"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    freight: Mapped[Freight] = relationship(  # type: ignore[name-defined]  # noqa: F821
         lazy="noload"
     )

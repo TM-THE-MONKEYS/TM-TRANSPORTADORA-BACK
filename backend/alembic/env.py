@@ -6,24 +6,25 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.config.settings import get_settings
-from app.core.database.base import Base  # noqa: F401
+import app.modules.auth.models  # noqa: F401
+import app.modules.clients.models  # noqa: F401
+import app.modules.drivers.models  # noqa: F401
+import app.modules.finance.models  # noqa: F401
+import app.modules.freights.models  # noqa: F401
+import app.modules.fuel.models  # noqa: F401
+import app.modules.maintenance.models  # noqa: F401
+import app.modules.notifications.models  # noqa: F401
+import app.modules.status_history.models  # noqa: F401
+import app.modules.tenants.models  # noqa: F401
+import app.modules.tolls.models  # noqa: F401
+import app.modules.tracking.models  # noqa: F401
+import app.modules.trucks.models  # noqa: F401
 
 # Import all models so Alembic can detect them
 import app.modules.users.models  # noqa: F401
-import app.modules.auth.models  # noqa: F401
-import app.modules.drivers.models  # noqa: F401
-import app.modules.trucks.models  # noqa: F401
-import app.modules.clients.models  # noqa: F401
-import app.modules.freights.models  # noqa: F401
-import app.modules.maintenance.models  # noqa: F401
-import app.modules.finance.models  # noqa: F401
-import app.modules.tracking.models  # noqa: F401
-import app.modules.notifications.models  # noqa: F401
-import app.modules.fuel.models  # noqa: F401
-import app.modules.tenants.models  # noqa: F401
+from app.core.config.settings import get_settings
+from app.core.database.base import Base  # noqa: F401
 
 config = context.config
 
@@ -33,7 +34,6 @@ if config.config_file_name is not None:
 settings = get_settings()
 
 # Use URL object directly to avoid configparser % interpolation issues
-from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 
 _DB_URL = settings.database_url_async

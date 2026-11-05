@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 import structlog
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from app.modules.drivers.models import Driver
 from app.shared.base_repository import TenantBaseRepository
 from app.shared.enums import DriverStatus
 from app.shared.pagination import PageParams
+from app.shared.utils.dates import today_sp
 
 log = structlog.get_logger(__name__)
 
@@ -66,6 +68,23 @@ class DriverRepository(TenantBaseRepository[Driver]):
             query.order_by(Driver.nome).offset(params.offset).limit(params.limit)
         )
         return list(result.scalars().all()), total
+
+    async def list_cnh_alerts(self, days_ahead: int = 30) -> list[Driver]:
+        """CNH vencida ou a vencer em até days_ahead dias."""
+        today = today_sp()
+        limit = today + timedelta(days=days_ahead)
+        result = await self._session.execute(
+            self._base_query()
+            .where(
+                Driver.cnh_expiry.isnot(None),
+                Driver.cnh_expiry <= limit,
+            )
+            .order_by(Driver.cnh_expiry.asc())
+        )
+        return list(result.scalars().all())
+
+    async def count_cnh_alerts(self, days_ahead: int = 30) -> int:
+        return len(await self.list_cnh_alerts(days_ahead))
 
     async def hard_delete(self, driver: Driver) -> None:
         """Remove motorista; abastecimentos/pedágios/fretes preservam histórico (FK SET NULL)."""

@@ -7,9 +7,9 @@ from datetime import date
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.finance.competencia_schemas import CompetenciaReportResponse
 from app.modules.finance.models import FinanceEntry
 from app.modules.finance.repository import FinanceRepository
-from app.modules.finance.competencia_schemas import CompetenciaReportResponse
 from app.modules.finance.schemas import (
     CashFlowResponse,
     FinanceEntryCreate,
@@ -19,6 +19,7 @@ from app.modules.users.models import User
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.utils.dates import today_sp
 
 log = structlog.get_logger(__name__)
 
@@ -40,9 +41,15 @@ class FinanceService:
         if user.role not in _WRITE_ROLES:
             raise ForbiddenException("Acesso restrito para alterar lançamentos financeiros")
 
+    @staticmethod
+    def _fill_payment_date(entry: FinanceEntry) -> None:
+        if entry.status == FinanceEntryStatus.PAGO and entry.data_pagamento is None:
+            entry.data_pagamento = today_sp()
+
     async def create(self, data: FinanceEntryCreate, created_by: User) -> FinanceEntry:
         self._check_write_access(created_by)
         entry = FinanceEntry(**data.model_dump())
+        self._fill_payment_date(entry)
         entry = await self._repo.create(entry)
         await self._session.commit()
         log.info("finance_entry_created", entry_id=str(entry.id), tipo=data.tipo.value)
@@ -93,6 +100,7 @@ class FinanceService:
             raise NotFoundException("Lançamento não encontrado")
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(entry, field, value)
+        self._fill_payment_date(entry)
         entry = await self._repo.update(entry)
         await self._session.commit()
         return entry
@@ -159,3 +167,56 @@ class FinanceService:
         await self._session.commit()
         log.info("finance_sync_from_freights", **stats)
         return stats
+
+    async def average_receipt_time_by_client(
+        self, requesting_user: User
+    ) -> list:
+        """Prazo médio (dias) entre vencimento/criação e pagamento por cliente."""
+        from sqlalchemy import case, func, select
+
+        from app.modules.clients.models import Client
+        from app.modules.finance.schemas import ClientReceiptTimeItem
+        from app.modules.freights.models import Freight
+
+        self._check_read_access(requesting_user)
+        anchor = case(
+            (
+                FinanceEntry.data_vencimento.isnot(None),
+                FinanceEntry.data_vencimento,
+            ),
+            else_=func.date(FinanceEntry.created_at),
+        )
+        days_expr = FinanceEntry.data_pagamento - anchor
+        result = await self._session.execute(
+            select(
+                Client.id,
+                Client.nome,
+                func.count(FinanceEntry.id),
+                func.avg(days_expr),
+            )
+            .select_from(FinanceEntry)
+            .join(Freight, Freight.id == FinanceEntry.freight_id)
+            .join(Client, Client.id == Freight.client_id)
+            .where(
+                FinanceEntry.deleted_at.is_(None),
+                FinanceEntry.tenant_id == self._tenant_id,
+                FinanceEntry.tipo == FinanceEntryType.RECEITA,
+                FinanceEntry.status == FinanceEntryStatus.PAGO,
+                FinanceEntry.data_pagamento.isnot(None),
+                Freight.deleted_at.is_(None),
+                Client.deleted_at.is_(None),
+            )
+            .group_by(Client.id, Client.nome)
+            .order_by(func.avg(days_expr).asc())
+        )
+        items: list[ClientReceiptTimeItem] = []
+        for client_id, nome, count, avg_days in result.all():
+            items.append(
+                ClientReceiptTimeItem(
+                    client_id=client_id,
+                    client_name=nome,
+                    entries_count=int(count),
+                    avg_days_to_receipt=float(avg_days or 0),
+                )
+            )
+        return items

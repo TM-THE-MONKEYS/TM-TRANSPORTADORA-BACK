@@ -175,6 +175,7 @@ class FuelService:
             valor_total=valor_total,
             valor_litro=valor_litro,
             km_atual=data.km_atual,
+            tanque_cheio=bool(data.tanque_cheio),
             posto=data.posto,
             cidade=data.cidade,
             estado=data.estado,

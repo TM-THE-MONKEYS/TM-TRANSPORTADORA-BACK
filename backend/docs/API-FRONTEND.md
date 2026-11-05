@@ -195,7 +195,7 @@ Público. Sem autenticação.
 
 **Body:**
 ```json
-{ "email": "admin@tmtransportadora.com.br", "password": "Admin@123!" }
+{ "email": "usuario@example.com", "password": "<senha>" }
 ```
 
 **Resposta 200:** `LoginResponse`
@@ -548,6 +548,12 @@ interface TruckRead {
 
 ---
 
+### GET `/trucks/{truck_id}/consumption`
+
+Consumo real entre abastecimentos com `tanque_cheio=true`, desvio vs cadastro e custo/km.
+
+---
+
 ### DELETE `/trucks/{truck_id}`
 
 **Resposta 204**  
@@ -758,6 +764,9 @@ interface FreightRead {
   freight_type: "carga_geral";
   status: FreightStatus;
   deadline_at: string | null;
+  coletado_em: string | null;
+  delivered_at: string | null;
+  delivery_real_origin: "registrada" | "tracking" | "updated_at" | null;
   responsible_id: string | null;
   truck_id: string | null;
   driver_id: string | null;
@@ -780,6 +789,8 @@ interface FreightStop {
 
 > `paradas` no POST é opcional (máx. 20). Ordem sequencial 1..N. Ao marcar frete como `entregue`, o backend gera despesa **Comissão** (se motorista tiver `commission_pct` > 0).
 
+`data_coleta` é a data **planejada** de coleta (cadastro). `coletado_em` é a coleta efetiva, gravada na criação já em `em_coleta`/`em_transporte` ou na transição para esses status (e também na entrega, se ainda estiver vazia). `delivered_at` espelha `data_entrega_real`. `delivery_real_origin`: `registrada` (transição ou edição), `tracking` (backfill pelo evento), `updated_at` (backfill inferido). `null` com data preenchida = valor legado.
+
 ---
 
 ### PATCH `/freights/{freight_id}`
@@ -800,16 +811,52 @@ Avança um passo no fluxo linear. Sem body.
 
 ### PATCH `/freights/{freight_id}/status`
 
-**Body:** `{ "status": "confirmado" }`
+**Body:**
+```json
+{
+  "status": "cancelado",
+  "motivo_cancelamento": "cliente_desistiu",
+  "motivo_cancelamento_detalhe": "opcional",
+  "motivo_atraso": "transito"
+}
+```
 
-Atualiza status com validação de transição.
+Atualiza status com validação de transição. `motivo_cancelamento` obrigatório ao cancelar. `motivo_atraso` obrigatório se entrega ficar fora do prazo.
+
+---
+
+### GET `/freights/{freight_id}/history`
+
+Linha do tempo de status. Mesma permissão de leitura do frete.
+
+```typescript
+interface StatusHistoryEntry {
+  id: string;
+  entity_type: "freight";
+  entity_id: string;
+  from_status: string | null;
+  to_status: string;
+  changed_by_user_id: string | null;
+  changed_at: string;
+  source: "api" | "tracking" | "system";
+  motivo: string | null;
+}
+```
+
+Reabrir um frete `entregue` limpa `data_entrega_real` e grava motivo `reabertura: data_entrega_real limpa`.
 
 ---
 
 ### DELETE `/freights/{freight_id}`
 
+Exclusão lógica do frete e dos filhos operacionais (custos, paradas, anexos, abastecimento, pedágio, tracking, notificações) e dos lançamentos financeiros. As linhas permanecem com `deleted_at` e somem das listagens.
+
+**Query:** `purge` (default `false`), `confirmacao`
+
+Purga física (`purge=true`) exige papel **admin** e `confirmacao=PURGAR`. Apaga o frete, os filhos e o histórico de status.
+
 **Resposta 204**  
-**Erros:** `403` só permite excluir `orcamento` ou `cancelado`
+**Erros:** `400` purga sem `confirmacao=PURGAR`; `403` papel ou status não permitido (não-admin só exclui `orcamento` ou `cancelado`)
 
 ---
 
@@ -922,9 +969,12 @@ interface CashFlow {
   "data_vencimento": "2026-06-10",
   "data_pagamento": null,
   "status": "pendente",
+  "forma_pagamento": "pix",
   "observacoes": null
 }
 ```
+
+`forma_pagamento`: `pix` | `boleto` | `transferencia` | `dinheiro` | `cartao` | `outros`
 
 ---
 
@@ -1018,6 +1068,7 @@ interface ActiveFreightContext {
   "valor_total": "1.200,75",
   "valor_litro": "7,98",
   "km_atual": 185420,
+  "tanque_cheio": true,
   "posto": "Posto Shell",
   "cidade": "Joinville",
   "estado": "SC",
@@ -1025,6 +1076,8 @@ interface ActiveFreightContext {
   "data_abastecimento": "2026-05-22T18:00:00Z"
 }
 ```
+
+`tanque_cheio` marca o ponto de referência para cálculo de consumo real km/l.
 
 Aliases aceitos: `freightId`, `driverId`, `liters` → `litros`, `value`/`valor`/`amount` → `valor_total`, `gasStation` → `posto`, `currentKm` → `km_atual`.
 
@@ -1238,6 +1291,10 @@ Marca todas como lidas.
 
 ### GET `/dashboard/kpis`
 
+**Query (só entram em entregas no prazo):** `competencia_mes`, `competencia_ano`, `driver_id`, `truck_id`, `client_id`
+
+Os demais KPIs ignoram esses filtros.
+
 **Resposta 200:**
 ```typescript
 interface DashboardKpis {
@@ -1246,10 +1303,15 @@ interface DashboardKpis {
   available_drivers: number;
   monthly_revenue_brl: number;
   operational_costs_brl: number;
-  maintenance_alerts: number;
+  maintenance_alerts: number; // data (30d) OU km próximo
   financial_pending: number;
+  on_time_deliveries: number;
+  deliveries_with_deadline: number;
+  cnh_alerts: number; // CNH vencida ou a vencer em 30 dias
 }
 ```
+
+`on_time_deliveries`: fretes `entregue` com `data_entrega_real <= data_entrega_prevista`. `deliveries_with_deadline` é o total com as duas datas preenchidas, no mesmo filtro.
 
 ---
 
@@ -1268,6 +1330,8 @@ interface FreightStatusCount {
 ### GET `/dashboard/revenue-series`
 
 **Query:** `days` (padrão `30`, max `365`)
+
+Receitas `pago` agrupadas por `data_pagamento` (não por `created_at`). Ao marcar um lançamento como `pago` sem data, o backend preenche com o dia de hoje em `America/Sao_Paulo`.
 
 **Resposta 200:**
 ```typescript
@@ -1357,11 +1421,7 @@ const freights = await api<PagedResponse<FreightListItem>>(
 
 ## Credenciais de desenvolvimento (seed)
 
-| Campo | Valor |
-|-------|-------|
-| Email | `admin@tmtransportadora.com.br` |
-| Senha | `Admin@123!` |
-| Role | `admin` |
+O seed não grava e-mail nem senha no repositório. No ambiente local, use `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`.
 
 ---
 

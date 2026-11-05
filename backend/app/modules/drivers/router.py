@@ -13,6 +13,7 @@ from app.api.v1.dependencies.database import get_db
 from app.modules.drivers.document_schemas import DriverDocumentFrontendRead
 from app.modules.drivers.document_service import DriverDocumentService
 from app.modules.drivers.schemas import (
+    DriverCnhAlertRead,
     DriverCreate,
     DriverFrontendListItem,
     DriverFrontendRead,
@@ -22,6 +23,7 @@ from app.modules.drivers.service import DriverService
 from app.modules.users.models import User
 from app.shared.enums import DriverDocumentType, DriverStatus
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.utils.dates import today_sp
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
 
@@ -40,6 +42,18 @@ async def list_drivers(
     result = await service.list(params, current_user, status, search)
     frontend_items = [DriverFrontendListItem.from_orm(d) for d in result.items]
     return PagedResponse.create(frontend_items, result.total, params)
+
+
+@router.get("/alerts", response_model=list[DriverCnhAlertRead])
+async def list_driver_cnh_alerts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    days_ahead: int = Query(default=30, ge=1, le=365),
+) -> list[DriverCnhAlertRead]:
+    service = DriverService(db, current_user.tenant_id)
+    drivers = await service.list_cnh_alerts(current_user, days_ahead)
+    today = today_sp()
+    return [DriverCnhAlertRead.from_orm(d, today=today) for d in drivers]
 
 
 @router.post("", response_model=DriverFrontendRead, status_code=status.HTTP_201_CREATED)

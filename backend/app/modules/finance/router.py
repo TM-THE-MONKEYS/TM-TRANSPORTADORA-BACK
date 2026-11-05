@@ -18,6 +18,7 @@ from app.modules.finance.competencia_schemas import (
 )
 from app.modules.finance.schemas import (
     CashFlowResponse,
+    ClientReceiptTimeItem,
     FinanceEntryCreate,
     FinanceEntryListResponse,
     FinanceEntryRead,
@@ -46,6 +47,18 @@ async def sync_finance_from_freights(
     """Gera receitas/despesas a partir de fretes, abastecimentos e custos existentes."""
     service = FinanceService(db, current_user.tenant_id)
     return await service.sync_from_freights(current_user)
+
+
+@router.get(
+    "/analytics/receipt-time",
+    response_model=list[ClientReceiptTimeItem],
+)
+async def get_receipt_time_by_client(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> list[ClientReceiptTimeItem]:
+    service = FinanceService(db, current_user.tenant_id)
+    return await service.average_receipt_time_by_client(current_user)
 
 
 @router.get("/cash-flow", response_model=CashFlowResponse)

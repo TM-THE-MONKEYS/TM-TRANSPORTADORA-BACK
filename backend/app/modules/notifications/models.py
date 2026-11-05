@@ -4,18 +4,43 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.base_model import BaseModel, TenantMixin
+from app.shared.base_model import BaseModel, SoftDeleteMixin, TenantMixin
+
+_ACTIVE_NOT_NULL = "deleted_at IS NULL"
 from app.shared.enums import NotificationType
 
 
-class FreightNotification(TenantMixin, BaseModel):
+class FreightNotification(TenantMixin, SoftDeleteMixin, BaseModel):
     """Notificação gerada quando motorista/operador registra ocorrência de rastreamento."""
 
     __tablename__ = "tm_freight_notifications"
+    __table_args__ = (
+        Index(
+            "uq_tm_freight_notifications_tracking_active",
+            "tracking_update_id",
+            unique=True,
+            sqlite_where=text("tracking_update_id IS NOT NULL AND deleted_at IS NULL"),
+            postgresql_where=text("tracking_update_id IS NOT NULL AND deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_tm_freight_notifications_fuel_active",
+            "fuel_refill_id",
+            unique=True,
+            sqlite_where=text("fuel_refill_id IS NOT NULL AND deleted_at IS NULL"),
+            postgresql_where=text("fuel_refill_id IS NOT NULL AND deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_tm_freight_notifications_toll_active",
+            "toll_charge_id",
+            unique=True,
+            sqlite_where=text("toll_charge_id IS NOT NULL AND deleted_at IS NULL"),
+            postgresql_where=text("toll_charge_id IS NOT NULL AND deleted_at IS NULL"),
+        ),
+    )
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -27,19 +52,16 @@ class FreightNotification(TenantMixin, BaseModel):
         UUID(as_uuid=True),
         ForeignKey("tm_tracking_updates.id", ondelete="CASCADE"),
         nullable=True,
-        unique=True,
     )
     fuel_refill_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tm_fuel_refills.id", ondelete="CASCADE"),
         nullable=True,
-        unique=True,
     )
     toll_charge_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tm_toll_charges.id", ondelete="CASCADE"),
         nullable=True,
-        unique=True,
     )
     tipo: Mapped[NotificationType] = mapped_column(
         Enum(
@@ -63,19 +85,26 @@ class FreightNotification(TenantMixin, BaseModel):
     autor_nome: Mapped[str] = mapped_column(String(150), nullable=False)
     freight_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
-    reads: Mapped[list["NotificationRead"]] = relationship(
+    reads: Mapped[list[NotificationRead]] = relationship(
         back_populates="notification",
         cascade="all, delete-orphan",
         lazy="noload",
     )
 
 
-class NotificationRead(TenantMixin, BaseModel):
+class NotificationRead(TenantMixin, SoftDeleteMixin, BaseModel):
     """Controle de leitura por usuário (badge / centro de notificações)."""
 
     __tablename__ = "tm_notification_reads"
     __table_args__ = (
-        UniqueConstraint("notification_id", "user_id", name="uq_notification_read_user"),
+        Index(
+            "uq_notification_read_user_active",
+            "notification_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text(_ACTIVE_NOT_NULL),
+            postgresql_where=text(_ACTIVE_NOT_NULL),
+        ),
     )
 
     notification_id: Mapped[uuid.UUID] = mapped_column(
@@ -92,4 +121,4 @@ class NotificationRead(TenantMixin, BaseModel):
     )
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    notification: Mapped["FreightNotification"] = relationship(back_populates="reads")
+    notification: Mapped[FreightNotification] = relationship(back_populates="reads")

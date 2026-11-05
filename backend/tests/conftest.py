@@ -10,11 +10,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.core.database.base import Base
-
 import app.modules.fuel.models  # noqa: F401
 import app.modules.notifications.models  # noqa: F401 — registra tabelas no metadata
+import app.modules.status_history.models  # noqa: F401
 import app.modules.tolls.models  # noqa: F401
+from app.core.database.base import Base
 from app.core.security.jwt import create_access_token
 from app.core.security.password import hash_password
 from app.main import create_app
@@ -103,7 +103,7 @@ async def admin_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     user = User(
         nome="Admin Test",
         email="admin@test.com",
-        hashed_password=hash_password("Admin@123!"),
+        hashed_password=hash_password("test-admin-password"),
         role=UserRole.ADMIN,
         is_active=True,
         tenant_id=test_tenant.id,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 import pytest
 from httpx import AsyncClient
@@ -140,7 +141,7 @@ async def test_delete_freight_cascades_costs_fuel_and_finance(
     test_tenant: Tenant,
 ) -> None:
     """Frete excluído remove custos, abastecimentos e lançamentos financeiros vinculados."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.modules.freights.models import FreightCost
     from app.modules.fuel.models import FuelRefill
@@ -162,7 +163,7 @@ async def test_delete_freight_cascades_costs_fuel_and_finance(
         litros=50.0,
         valor_total=300.0,
         valor_litro=6.0,
-        data_abastecimento=datetime.now(timezone.utc),
+        data_abastecimento=datetime.now(UTC),
         posto="Posto Teste",
     )
     db_session.add(fuel)
@@ -177,8 +178,14 @@ async def test_delete_freight_cascades_costs_fuel_and_finance(
 
     db_session.expire_all()
     assert await _active_finance_entries(db_session, freight_id) == []
-    assert await db_session.get(FreightCost, cost_id) is None
-    assert await db_session.get(FuelRefill, fuel_id) is None
+    cost = await db_session.get(FreightCost, cost_id)
+    fuel_row = await db_session.get(FuelRefill, fuel_id)
+    assert cost is not None and cost.deleted_at is not None
+    assert fuel_row is not None and fuel_row.deleted_at is not None
+    listed = await client.get("/api/v1/fuel", headers=admin_headers)
+    assert listed.status_code == 200, listed.text
+    listed_ids = {item["id"] for item in listed.json()["items"]}
+    assert str(fuel_id) not in listed_ids
 
 
 @pytest.mark.asyncio

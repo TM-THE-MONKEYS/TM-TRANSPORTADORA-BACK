@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,7 +82,7 @@ class TrackingService:
             longitude=data.longitude,
             cidade=data.cidade,
             estado=data.estado,
-            evento_at=data.evento_at or datetime.now(timezone.utc),
+            evento_at=data.evento_at or datetime.now(UTC),
             tenant_id=self._tenant_id,
         )
         tracking = await self._repo.create(tracking)
@@ -98,7 +98,7 @@ class TrackingService:
 
             freight_service = FreightService(self._session, self._tenant_id)
             await freight_service.mark_delivered_from_tracking(
-                data.freight_id, commit=False
+                data.freight_id, user=added_by, commit=False
             )
 
         await self._session.commit()

@@ -95,6 +95,54 @@ class NotificationType(StrEnum):
     TOLL_CHARGE = "toll_charge"
 
 
+class StatusEntityType(StrEnum):
+    FREIGHT = "freight"
+    DRIVER = "driver"
+    TRUCK = "truck"
+
+
+class StatusChangeSource(StrEnum):
+    API = "api"
+    TRACKING = "tracking"
+    SYSTEM = "system"
+
+
+class DeliveryRealOrigin(StrEnum):
+    """Origem de data_entrega_real. NULL = valor legado, anterior ao backfill."""
+
+    REGISTRADA = "registrada"
+    TRACKING = "tracking"
+    UPDATED_AT = "updated_at"
+
+
+class PaymentMethod(StrEnum):
+    PIX = "pix"
+    BOLETO = "boleto"
+    TRANSFERENCIA = "transferencia"
+    DINHEIRO = "dinheiro"
+    CARTAO = "cartao"
+    OUTROS = "outros"
+
+
+class CancelReason(StrEnum):
+    CLIENTE_DESISTIU = "cliente_desistiu"
+    CARGA_INDISPONIVEL = "carga_indisponivel"
+    PROBLEMA_VEICULO = "problema_veiculo"
+    PROBLEMA_MOTORISTA = "problema_motorista"
+    CLIMA = "clima"
+    PRECO = "preco"
+    OUTROS = "outros"
+
+
+class DelayReason(StrEnum):
+    TRANSITO = "transito"
+    CLIMA = "clima"
+    FILA_CLIENTE = "fila_cliente"
+    AVARIA = "avaria"
+    DOCUMENTACAO = "documentacao"
+    OUTROS = "outros"
+
+
 # Frete em viagem — motorista pode registrar abastecimento/ocorrências
 ACTIVE_FREIGHT_STATUSES: frozenset[FreightStatus] = frozenset({
     FreightStatus.CONFIRMADO,

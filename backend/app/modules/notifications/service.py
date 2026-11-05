@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 import structlog
 from sqlalchemy import select
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.freights.models import Freight
 from app.modules.freights.repository import FreightRepository
+from app.modules.fuel.models import FuelRefill
 from app.modules.notifications.models import FreightNotification
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.schemas import (
@@ -19,13 +19,11 @@ from app.modules.notifications.schemas import (
     NotificationListResponse,
     UnreadCountResponse,
 )
-from app.modules.fuel.models import FuelRefill
 from app.modules.tolls.models import TollCharge
 from app.modules.tracking.models import TrackingUpdate
 from app.modules.users.models import User
 from app.shared.enums import (
     TRACKING_STATUS_LABELS,
-    FreightStatus,
     NotificationType,
     TrackingStatus,
     UserRole,
@@ -209,7 +207,7 @@ class NotificationService:
         enriched = await self._enrich_notifications(items)
         return NotificationListResponse(
             items=[
-                self._to_item_read(n, is_read, ctx) for (n, is_read), ctx in zip(items, enriched)
+                self._to_item_read(n, is_read, ctx) for (n, is_read), ctx in zip(items, enriched, strict=False)
             ],
             total=total,
             unread_count=unread_count,
@@ -252,7 +250,10 @@ class NotificationService:
         trackings: dict[uuid.UUID, TrackingUpdate] = {}
         if tracking_ids:
             tracking_result = await self._session.execute(
-                select(TrackingUpdate).where(TrackingUpdate.id.in_(tracking_ids))
+                select(TrackingUpdate).where(
+                    TrackingUpdate.id.in_(tracking_ids),
+                    TrackingUpdate.deleted_at.is_(None),
+                )
             )
             trackings = {t.id: t for t in tracking_result.scalars().all()}
 

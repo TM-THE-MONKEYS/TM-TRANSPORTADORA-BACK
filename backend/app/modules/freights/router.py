@@ -5,11 +5,12 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from starlette.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import Response
 
 from app.api.v1.dependencies.auth import get_current_active_user
 from app.api.v1.dependencies.database import get_db
+from app.modules.finance.schemas import ReasonCountItem
 from app.modules.freights.schemas import (
     FreightCostCreate,
     FreightCostRead,
@@ -21,11 +22,18 @@ from app.modules.freights.schemas import (
     FreightUpdate,
 )
 from app.modules.freights.service import FreightService
+from app.modules.status_history.schemas import StatusHistoryRead
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus
 from app.shared.pagination import PagedResponse, PageParams
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/freights", tags=["freights"])
+
+
+class FreightReasonRankings(BaseModel):
+    cancelamentos: list[ReasonCountItem]
+    atrasos: list[ReasonCountItem]
 
 
 @router.get("/summary", response_model=FreightSummaryResponse)
@@ -44,6 +52,16 @@ async def get_freights_summary(
         current_user, status, driver_id, truck_id, competencia_mes, competencia_ano
     )
     return FreightSummaryResponse(**data)
+
+
+@router.get("/analytics/reasons", response_model=FreightReasonRankings)
+async def get_freight_reason_rankings(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FreightReasonRankings:
+    service = FreightService(db, current_user.tenant_id)
+    data = await service.reason_rankings(current_user)
+    return FreightReasonRankings(**data)
 
 
 @router.get("", response_model=PagedResponse[FreightFrontendListItem])
@@ -122,7 +140,7 @@ async def update_freight_status(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
-    freight = await service.update_status(freight_id, payload.status, current_user)
+    freight = await service.update_status(freight_id, payload, current_user)
     return FreightFrontendRead.from_orm(freight)
 
 
@@ -135,10 +153,26 @@ async def delete_freight(
     freight_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
+    purge: bool = Query(default=False),
+    confirmacao: str | None = Query(default=None),
 ) -> Response:
     service = FreightService(db, current_user.tenant_id)
-    await service.delete(freight_id, current_user)
+    await service.delete(
+        freight_id, current_user, purge=purge, confirmacao=confirmacao
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{freight_id}/history", response_model=list[StatusHistoryRead])
+async def get_freight_status_history(
+    freight_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> list[StatusHistoryRead]:
+    """Linha do tempo das mudanças de status do frete."""
+    service = FreightService(db, current_user.tenant_id)
+    rows = await service.list_status_history(freight_id, current_user)
+    return [StatusHistoryRead.model_validate(row) for row in rows]
 
 
 @router.get("/{freight_id}/costs", response_model=list[FreightCostRead])

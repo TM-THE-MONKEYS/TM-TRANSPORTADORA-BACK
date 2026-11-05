@@ -33,29 +33,38 @@ class Freight(TenantMixin, SoftDeleteMixin, BaseModel):
         default=FreightStatus.EM_TRANSPORTE,
         index=True,
     )
+    # Prazo planejado de coleta, informado no cadastro. Não é a coleta efetiva.
     data_coleta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_entrega_prevista: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Entrega efetiva. Preenchida na transição para entregue (ou backfill).
     data_entrega_real: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # registrada | tracking | updated_at. NULL = valor legado, anterior ao backfill.
+    data_entrega_real_origem: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Coleta efetiva: primeira entrada em em_coleta ou em_transporte.
+    coletado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     distancia_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    motivo_cancelamento: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    motivo_cancelamento_detalhe: Mapped[str | None] = mapped_column(Text, nullable=True)
+    motivo_atraso: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
-    costs: Mapped[list["FreightCost"]] = relationship(
+    costs: Mapped[list[FreightCost]] = relationship(
         back_populates="freight", cascade="all, delete-orphan", lazy="noload"
     )
-    attachments: Mapped[list["FreightAttachment"]] = relationship(
+    attachments: Mapped[list[FreightAttachment]] = relationship(
         back_populates="freight", cascade="all, delete-orphan", lazy="noload"
     )
-    tracking_updates: Mapped[list["TrackingUpdate"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    tracking_updates: Mapped[list[TrackingUpdate]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="freight", cascade="all, delete-orphan", lazy="noload"
     )
-    stops: Mapped[list["FreightStop"]] = relationship(
+    stops: Mapped[list[FreightStop]] = relationship(
         back_populates="freight",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
 
 
-class FreightStop(TenantMixin, BaseModel):
+class FreightStop(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_freight_stops"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
@@ -70,10 +79,10 @@ class FreightStop(TenantMixin, BaseModel):
     cargo_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    freight: Mapped["Freight"] = relationship(back_populates="stops")
+    freight: Mapped[Freight] = relationship(back_populates="stops")
 
 
-class FreightCost(TenantMixin, BaseModel):
+class FreightCost(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_freight_costs"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
@@ -83,10 +92,10 @@ class FreightCost(TenantMixin, BaseModel):
     valor: Mapped[float] = mapped_column(Float, nullable=False)
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    freight: Mapped["Freight"] = relationship(back_populates="costs")
+    freight: Mapped[Freight] = relationship(back_populates="costs")
 
 
-class FreightAttachment(TenantMixin, BaseModel):
+class FreightAttachment(TenantMixin, SoftDeleteMixin, BaseModel):
     __tablename__ = "tm_freight_attachments"
 
     freight_id: Mapped[uuid.UUID] = mapped_column(
@@ -96,4 +105,4 @@ class FreightAttachment(TenantMixin, BaseModel):
     tipo: Mapped[str] = mapped_column(String(50), nullable=False, default="comprovante")
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    freight: Mapped["Freight"] = relationship(back_populates="attachments")
+    freight: Mapped[Freight] = relationship(back_populates="attachments")

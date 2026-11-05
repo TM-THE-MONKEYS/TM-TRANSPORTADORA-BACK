@@ -2,17 +2,37 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.freights.models import Freight, FreightCost, FreightStop
 from app.modules.freights.repository import FreightRepository
-from app.modules.freights.schemas import FreightCostCreate, FreightCreate, FreightStopCreate, FreightUpdate
+from app.modules.freights.schemas import (
+    FreightCostCreate,
+    FreightCreate,
+    FreightStatusUpdate,
+    FreightStopCreate,
+    FreightUpdate,
+)
+from app.modules.status_history.models import StatusHistory
+from app.modules.status_history.service import StatusHistoryService
 from app.modules.users.models import User
-from app.shared.enums import FreightStatus, TruckStatus, UserRole
-from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
+from app.shared.enums import (
+    DeliveryRealOrigin,
+    FreightStatus,
+    StatusChangeSource,
+    StatusEntityType,
+    TruckStatus,
+    UserRole,
+)
+from app.shared.exceptions.custom import (
+    BadRequestException,
+    ForbiddenException,
+    NotFoundException,
+)
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
     assert_freight_read_access,
@@ -43,6 +63,9 @@ _ALLOWED_TRANSITIONS: dict[FreightStatus, frozenset[FreightStatus]] = {
 _TRUCK_BUSY_STATUSES: frozenset[FreightStatus] = frozenset(
     {FreightStatus.EM_COLETA, FreightStatus.EM_TRANSPORTE}
 )
+
+_REOPEN_MOTIVO = "reabertura: data_entrega_real limpa"
+PURGE_CONFIRMATION = "PURGAR"
 
 # Não sobrescrever manutenção/inativo — sync só mexe em disponivel ↔ em_viagem.
 _TRUCK_LOCKED_STATUSES: frozenset[TruckStatus] = frozenset(
@@ -76,7 +99,30 @@ class FreightService:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):
             raise ForbiddenException("Acesso negado")
 
-    async def _sync_truck_status(self, truck_id: uuid.UUID | None) -> None:
+    def _history(self) -> StatusHistoryService:
+        return StatusHistoryService(self._session, self._tenant_id)
+
+    @staticmethod
+    def _stamp_operational_dates(
+        freight: Freight,
+        old_status: FreightStatus | None,
+        new_status: FreightStatus,
+    ) -> None:
+        """Preenche coleta/entrega efetivas. data_coleta (planejada) não é tocada."""
+        now = datetime.now(UTC)
+        entered_collection = new_status in _TRUCK_BUSY_STATUSES or new_status == FreightStatus.ENTREGUE
+        if entered_collection and freight.coletado_em is None:
+            freight.coletado_em = now
+        if new_status == FreightStatus.ENTREGUE and freight.data_entrega_real is None:
+            freight.data_entrega_real = now
+            freight.data_entrega_real_origem = DeliveryRealOrigin.REGISTRADA.value
+        if old_status == FreightStatus.ENTREGUE and new_status != FreightStatus.ENTREGUE:
+            freight.data_entrega_real = None
+            freight.data_entrega_real_origem = None
+
+    async def _sync_truck_status(
+        self, truck_id: uuid.UUID | None, *, actor: User | None = None
+    ) -> None:
         """Atualiza disponivel ↔ em_viagem conforme fretes ativos do caminhão.
 
         Fonte de verdade no backend — o front só revalida cache. Não sobrescreve
@@ -95,8 +141,18 @@ class FreightService:
         on_trip = await self._repo.has_active_freight_for_truck(truck_id)
         next_status = TruckStatus.EM_VIAGEM if on_trip else TruckStatus.DISPONIVEL
         if truck.status != next_status:
+            previous = truck.status
             truck.status = next_status
             await self._session.flush()
+            await self._history().record(
+                entity_type=StatusEntityType.TRUCK,
+                entity_id=truck_id,
+                from_status=previous.value,
+                to_status=next_status.value,
+                source=StatusChangeSource.SYSTEM,
+                user_id=actor.id if actor else None,
+                motivo="sync frota a partir dos fretes ativos",
+            )
             log.info(
                 "truck_status_synced",
                 truck_id=str(truck_id),
@@ -111,11 +167,25 @@ class FreightService:
         freight_data["destino"] = data.destino.model_dump()
         freight = Freight(**freight_data)
         freight = await self._repo.create(freight)
+        self._stamp_operational_dates(freight, None, freight.status)
+        await self._history().record(
+            entity_type=StatusEntityType.FREIGHT,
+            entity_id=freight.id,
+            from_status=None,
+            to_status=freight.status.value,
+            source=StatusChangeSource.API,
+            user_id=created_by.id,
+            motivo="criação do frete",
+        )
         if data.paradas:
             stops = [self._stop_from_payload(p) for p in data.paradas]
             saved_stops = await self._repo.add_stops(freight.id, stops)
             freight.stops = saved_stops
-        from app.modules.finance.freight_sync import create_cost_expense, ensure_freight_revenue, is_fuel_cost_tipo
+        from app.modules.finance.freight_sync import (
+            create_cost_expense,
+            ensure_freight_revenue,
+            is_fuel_cost_tipo,
+        )
 
         for cost_data in data.costs:
             if is_fuel_cost_tipo(cost_data.tipo):
@@ -128,7 +198,7 @@ class FreightService:
             await create_cost_expense(self._session, cost)
         await ensure_freight_revenue(self._session, freight)
         if freight.truck_id and freight.status in _TRUCK_BUSY_STATUSES:
-            await self._sync_truck_status(freight.truck_id)
+            await self._sync_truck_status(freight.truck_id, actor=created_by)
         freight_id = freight.id
         await self._session.commit()
         self._session.expire(freight)
@@ -208,27 +278,48 @@ class FreightService:
         old_status = freight.status
         old_truck_id = freight.truck_id
         updated_fields = data.model_dump(exclude_none=True)
+        new_status = updated_fields.pop("status", None)
         for field, value in updated_fields.items():
             setattr(freight, field, value)
+        if (
+            "data_entrega_real" in updated_fields
+            and freight.data_entrega_real is not None
+        ):
+            freight.data_entrega_real_origem = DeliveryRealOrigin.REGISTRADA.value
         freight = await self._repo.update(freight)
         if "valor_frete" in updated_fields or "data_entrega_prevista" in updated_fields:
             from app.modules.finance.freight_sync import ensure_freight_revenue
 
             await ensure_freight_revenue(self._session, freight)
-        if data.status and data.status != old_status:
-            await self._on_status_changed(freight, old_status, data.status)
-        # Sync frota: caminhão antigo (se trocou) + atual após mudança de status/truck.
-        if "truck_id" in updated_fields or (data.status and data.status != old_status):
+        status_changed = new_status is not None and new_status != old_status
+        if status_changed:
+            await self._apply_status_change(
+                freight,
+                new_status,
+                commit=False,
+                user=updated_by,
+                source=StatusChangeSource.API,
+            )
+        truck_changed = "truck_id" in updated_fields
+        if truck_changed or status_changed:
             if old_truck_id and old_truck_id != freight.truck_id:
-                await self._sync_truck_status(old_truck_id)
-            await self._sync_truck_status(freight.truck_id)
+                await self._sync_truck_status(old_truck_id, actor=updated_by)
+            if truck_changed or not status_changed:
+                await self._sync_truck_status(freight.truck_id, actor=updated_by)
         await self._session.commit()
         if data.status or data.model_dump(exclude_none=True):
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
             assert freight is not None
         return freight
 
-    async def delete(self, freight_id: uuid.UUID, deleted_by: User) -> None:
+    async def delete(
+        self,
+        freight_id: uuid.UUID,
+        deleted_by: User,
+        *,
+        purge: bool = False,
+        confirmacao: str | None = None,
+    ) -> None:
         self._check_write_access(deleted_by)
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
@@ -241,11 +332,33 @@ class FreightService:
                 "Apenas fretes em orçamento ou cancelados podem ser removidos. "
                 "Administradores podem excluir fretes em qualquer status."
             )
-        removed_entries = await self._soft_delete_linked_finance_entries(freight_id)
-        cascade_counts = await self._hard_delete_linked_operational_records(freight_id)
         truck_id = freight.truck_id
+        if purge:
+            if deleted_by.role != UserRole.ADMIN:
+                raise ForbiddenException("Somente administradores podem purgar fretes")
+            if confirmacao != PURGE_CONFIRMATION:
+                raise BadRequestException(
+                    "Confirme a purga enviando confirmacao=PURGAR"
+                )
+            cascade_counts = await self._hard_delete_linked_operational_records(freight_id)
+            removed_entries = await self._hard_delete_linked_finance_entries(freight_id)
+            await self._hard_delete_status_history(freight_id)
+            await self._session.delete(freight)
+            await self._session.flush()
+            await self._sync_truck_status(truck_id, actor=deleted_by)
+            await self._session.commit()
+            log.info(
+                "freight_purged",
+                freight_id=str(freight_id),
+                finance_entries_removed=removed_entries,
+                **cascade_counts,
+            )
+            return
+
+        removed_entries = await self._soft_delete_linked_finance_entries(freight_id)
+        cascade_counts = await self._soft_delete_linked_operational_records(freight_id)
         await self._repo.soft_delete(freight)
-        await self._sync_truck_status(truck_id)
+        await self._sync_truck_status(truck_id, actor=deleted_by)
         await self._session.commit()
         log.info(
             "freight_deleted",
@@ -271,80 +384,113 @@ class FreightService:
         await self._session.flush()
         return len(entries)
 
-    async def _hard_delete_linked_operational_records(self, freight_id: uuid.UUID) -> dict[str, int]:
-        """Remove filhos operacionais (sem soft-delete) — frete de teste/erro não deixa órfãos.
-
-        Ordem: notificações → combustível/pedágio → tracking → anexos/custos/paradas.
-        Soft-delete do frete não dispara ON DELETE CASCADE do banco.
-        """
-        from sqlalchemy import delete
-
-        from app.modules.freights.models import FreightAttachment, FreightCost, FreightStop
+    def _child_models(self) -> tuple[type, ...]:
+        from app.modules.freights.models import FreightAttachment, FreightStop
         from app.modules.fuel.models import FuelRefill
-        from app.modules.notifications.models import FreightNotification, NotificationRead
+        from app.modules.notifications.models import FreightNotification
         from app.modules.tolls.models import TollCharge
         from app.modules.tracking.models import TrackingUpdate
 
+        return (
+            FreightNotification,
+            FuelRefill,
+            TollCharge,
+            TrackingUpdate,
+            FreightAttachment,
+            FreightCost,
+            FreightStop,
+        )
+
+    async def _soft_delete_linked_operational_records(
+        self, freight_id: uuid.UUID
+    ) -> dict[str, int]:
+        """Oculta filhos. A linha permanece para histórico e auditoria."""
+        from app.modules.notifications.models import (
+            FreightNotification,
+            NotificationRead,
+        )
+
+        now = datetime.now(UTC)
+        counts: dict[str, int] = {}
         notification_ids = select(FreightNotification.id).where(
             FreightNotification.freight_id == freight_id,
             FreightNotification.tenant_id == self._tenant_id,
         )
         reads = await self._session.execute(
-            delete(NotificationRead).where(NotificationRead.notification_id.in_(notification_ids))
+            update(NotificationRead)
+            .where(
+                NotificationRead.notification_id.in_(notification_ids),
+                NotificationRead.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
         )
-        notifications = await self._session.execute(
-            delete(FreightNotification).where(
-                FreightNotification.freight_id == freight_id,
-                FreightNotification.tenant_id == self._tenant_id,
+        counts["notification_reads_removed"] = reads.rowcount or 0
+        for model in self._child_models():
+            result = await self._session.execute(
+                update(model)
+                .where(
+                    model.freight_id == freight_id,  # type: ignore[attr-defined]
+                    model.tenant_id == self._tenant_id,  # type: ignore[attr-defined]
+                    model.deleted_at.is_(None),  # type: ignore[attr-defined]
+                )
+                .values(deleted_at=now)
+            )
+            counts[f"{model.__tablename__}_removed"] = result.rowcount or 0
+        await self._session.flush()
+        return counts
+
+    async def _hard_delete_linked_operational_records(
+        self, freight_id: uuid.UUID
+    ) -> dict[str, int]:
+        """Purga física. Só o caminho admin com confirmação explícita chama isto."""
+        from app.modules.notifications.models import (
+            FreightNotification,
+            NotificationRead,
+        )
+
+        notification_ids = select(FreightNotification.id).where(
+            FreightNotification.freight_id == freight_id,
+            FreightNotification.tenant_id == self._tenant_id,
+        )
+        counts: dict[str, int] = {}
+        reads = await self._session.execute(
+            delete(NotificationRead).where(
+                NotificationRead.notification_id.in_(notification_ids)
             )
         )
-        fuel = await self._session.execute(
-            delete(FuelRefill).where(
-                FuelRefill.freight_id == freight_id,
-                FuelRefill.tenant_id == self._tenant_id,
+        counts["notification_reads_removed"] = reads.rowcount or 0
+        for model in self._child_models():
+            result = await self._session.execute(
+                delete(model).where(
+                    model.freight_id == freight_id,  # type: ignore[attr-defined]
+                    model.tenant_id == self._tenant_id,  # type: ignore[attr-defined]
+                )
             )
-        )
-        tolls = await self._session.execute(
-            delete(TollCharge).where(
-                TollCharge.freight_id == freight_id,
-                TollCharge.tenant_id == self._tenant_id,
-            )
-        )
-        tracking = await self._session.execute(
-            delete(TrackingUpdate).where(
-                TrackingUpdate.freight_id == freight_id,
-                TrackingUpdate.tenant_id == self._tenant_id,
-            )
-        )
-        attachments = await self._session.execute(
-            delete(FreightAttachment).where(
-                FreightAttachment.freight_id == freight_id,
-                FreightAttachment.tenant_id == self._tenant_id,
-            )
-        )
-        costs = await self._session.execute(
-            delete(FreightCost).where(
-                FreightCost.freight_id == freight_id,
-                FreightCost.tenant_id == self._tenant_id,
-            )
-        )
-        stops = await self._session.execute(
-            delete(FreightStop).where(
-                FreightStop.freight_id == freight_id,
-                FreightStop.tenant_id == self._tenant_id,
+            counts[f"{model.__tablename__}_removed"] = result.rowcount or 0
+        await self._session.flush()
+        return counts
+
+    async def _hard_delete_linked_finance_entries(self, freight_id: uuid.UUID) -> int:
+        from app.modules.finance.models import FinanceEntry
+
+        result = await self._session.execute(
+            delete(FinanceEntry).where(
+                FinanceEntry.freight_id == freight_id,
+                FinanceEntry.tenant_id == self._tenant_id,
             )
         )
         await self._session.flush()
-        return {
-            "notification_reads_removed": reads.rowcount or 0,
-            "notifications_removed": notifications.rowcount or 0,
-            "fuel_refills_removed": fuel.rowcount or 0,
-            "toll_charges_removed": tolls.rowcount or 0,
-            "tracking_updates_removed": tracking.rowcount or 0,
-            "attachments_removed": attachments.rowcount or 0,
-            "costs_removed": costs.rowcount or 0,
-            "stops_removed": stops.rowcount or 0,
-        }
+        return result.rowcount or 0
+
+    async def _hard_delete_status_history(self, freight_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(StatusHistory).where(
+                StatusHistory.tenant_id == self._tenant_id,
+                StatusHistory.entity_type == StatusEntityType.FREIGHT.value,
+                StatusHistory.entity_id == freight_id,
+            )
+        )
+        await self._session.flush()
 
     async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
         self._check_write_access(requesting_user)
@@ -357,12 +503,26 @@ class FreightService:
             next_status = FreightStatus.ENTREGUE
         else:
             raise ForbiddenException("Frete já está no status final")
-        return await self._apply_status_change(freight, next_status, commit=True)
+        return await self._apply_status_change(
+            freight,
+            next_status,
+            commit=True,
+            user=requesting_user,
+            source=StatusChangeSource.API,
+        )
 
     async def update_status(
-        self, freight_id: uuid.UUID, new_status: FreightStatus, requesting_user: User
+        self,
+        freight_id: uuid.UUID,
+        payload: FreightStatusUpdate | FreightStatus,
+        requesting_user: User,
     ) -> Freight:
         self._check_write_access(requesting_user)
+        if isinstance(payload, FreightStatus):
+            update = FreightStatusUpdate(status=payload)
+        else:
+            update = payload
+        new_status = update.status
         freight = await self._repo.get_by_id(freight_id, for_update=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
@@ -377,10 +537,58 @@ class FreightService:
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
             assert freight is not None
             return freight
-        return await self._apply_status_change(freight, new_status, commit=True)
+
+        history_motivo: str | None = None
+        if new_status == FreightStatus.CANCELADO:
+            if not update.motivo_cancelamento:
+                raise BadRequestException(
+                    "Informe motivo_cancelamento ao cancelar o frete"
+                )
+            freight.motivo_cancelamento = update.motivo_cancelamento.value
+            freight.motivo_cancelamento_detalhe = update.motivo_cancelamento_detalhe
+            history_motivo = update.motivo_cancelamento.value
+            if update.motivo_cancelamento_detalhe:
+                history_motivo = (
+                    f"{history_motivo}: {update.motivo_cancelamento_detalhe}"
+                )
+        if new_status == FreightStatus.ENTREGUE:
+            prevista = freight.data_entrega_prevista
+            # Estampa temporária para saber se será atrasado; _stamp preenche real.
+            will_be_late = False
+            if prevista is not None:
+                # Compara com agora; a data real será now no stamp.
+                will_be_late = datetime.now(UTC) > prevista
+            if will_be_late:
+                if not update.motivo_atraso:
+                    raise BadRequestException(
+                        "Entrega fora do prazo: informe motivo_atraso"
+                    )
+                freight.motivo_atraso = update.motivo_atraso.value
+                history_motivo = f"atraso:{update.motivo_atraso.value}"
+            elif update.motivo_atraso:
+                freight.motivo_atraso = update.motivo_atraso.value
+
+        return await self._apply_status_change(
+            freight,
+            new_status,
+            commit=True,
+            user=requesting_user,
+            source=StatusChangeSource.API,
+            motivo=history_motivo,
+        )
+
+    async def list_status_history(
+        self, freight_id: uuid.UUID, requesting_user: User
+    ) -> list[StatusHistory]:
+        await self.get_by_id(freight_id, requesting_user)
+        return await self._history().list_for_entity(StatusEntityType.FREIGHT, freight_id)
 
     async def mark_delivered_from_tracking(
-        self, freight_id: uuid.UUID, *, commit: bool = False
+        self,
+        freight_id: uuid.UUID,
+        *,
+        user: User | None = None,
+        commit: bool = False,
     ) -> Freight | None:
         """Avança frete para entregue quando tracking registra entrega.
 
@@ -402,16 +610,24 @@ class FreightService:
         ):
             # Legado → primeiro normaliza para em_transporte, depois entrega no mesmo flush.
             if freight.status in _LEGACY_STATUSES:
-                old = freight.status
-                freight.status = FreightStatus.EM_TRANSPORTE
-                freight = await self._repo.update(freight)
-                await self._on_status_changed(freight, old, FreightStatus.EM_TRANSPORTE)
+                freight = await self._apply_status_change(
+                    freight,
+                    FreightStatus.EM_TRANSPORTE,
+                    commit=False,
+                    user=user,
+                    source=StatusChangeSource.TRACKING,
+                    motivo="normalização de status legado antes da entrega",
+                )
             else:
                 raise ForbiddenException(
                     f"Transição inválida: {freight.status.value} → entregue"
                 )
         return await self._apply_status_change(
-            freight, FreightStatus.ENTREGUE, commit=commit
+            freight,
+            FreightStatus.ENTREGUE,
+            commit=commit,
+            user=user,
+            source=StatusChangeSource.TRACKING,
         )
 
     async def _apply_status_change(
@@ -420,14 +636,30 @@ class FreightService:
         new_status: FreightStatus,
         *,
         commit: bool,
+        user: User | None,
+        source: StatusChangeSource,
+        motivo: str | None = None,
     ) -> Freight:
         freight_id = freight.id
         old_status = freight.status
         freight.status = new_status
+        self._stamp_operational_dates(freight, old_status, new_status)
         freight = await self._repo.update(freight)
         if new_status != old_status:
+            recorded_motivo = motivo
+            if old_status == FreightStatus.ENTREGUE and new_status != FreightStatus.ENTREGUE:
+                recorded_motivo = recorded_motivo or _REOPEN_MOTIVO
+            await self._history().record(
+                entity_type=StatusEntityType.FREIGHT,
+                entity_id=freight_id,
+                from_status=old_status.value,
+                to_status=new_status.value,
+                source=source,
+                user_id=user.id if user else None,
+                motivo=recorded_motivo,
+            )
             await self._on_status_changed(freight, old_status, new_status)
-            await self._sync_truck_status(freight.truck_id)
+            await self._sync_truck_status(freight.truck_id, actor=user)
         if commit:
             await self._session.commit()
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
@@ -476,7 +708,10 @@ class FreightService:
         freight = await self._repo.get_by_id(freight_id)
         if not freight:
             raise NotFoundException("Frete não encontrado")
-        from app.modules.finance.freight_sync import create_cost_expense, is_fuel_cost_tipo
+        from app.modules.finance.freight_sync import (
+            create_cost_expense,
+            is_fuel_cost_tipo,
+        )
 
         if is_fuel_cost_tipo(data.tipo):
             raise BadRequestException(
@@ -486,3 +721,50 @@ class FreightService:
         await create_cost_expense(self._session, cost)
         await self._session.commit()
         return cost
+
+    async def reason_rankings(self, requesting_user: User) -> dict[str, list]:
+        """Contagem de motivos de cancelamento e atraso."""
+        from sqlalchemy import func, select
+
+        from app.modules.finance.schemas import ReasonCountItem
+
+        if requesting_user.role not in (
+            UserRole.ADMIN,
+            UserRole.OPERADOR,
+            UserRole.FINANCEIRO,
+            UserRole.MOTORISTA,
+        ):
+            raise ForbiddenException("Acesso negado")
+
+        cancel_rows = await self._session.execute(
+            select(Freight.motivo_cancelamento, func.count(Freight.id))
+            .where(
+                Freight.deleted_at.is_(None),
+                Freight.tenant_id == self._tenant_id,
+                Freight.motivo_cancelamento.isnot(None),
+            )
+            .group_by(Freight.motivo_cancelamento)
+            .order_by(func.count(Freight.id).desc())
+        )
+        delay_rows = await self._session.execute(
+            select(Freight.motivo_atraso, func.count(Freight.id))
+            .where(
+                Freight.deleted_at.is_(None),
+                Freight.tenant_id == self._tenant_id,
+                Freight.motivo_atraso.isnot(None),
+            )
+            .group_by(Freight.motivo_atraso)
+            .order_by(func.count(Freight.id).desc())
+        )
+        return {
+            "cancelamentos": [
+                ReasonCountItem(reason=r, count=int(c))
+                for r, c in cancel_rows.all()
+                if r
+            ],
+            "atrasos": [
+                ReasonCountItem(reason=r, count=int(c))
+                for r, c in delay_rows.all()
+                if r
+            ],
+        }

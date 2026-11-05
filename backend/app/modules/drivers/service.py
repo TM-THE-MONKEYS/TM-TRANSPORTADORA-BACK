@@ -13,9 +13,15 @@ from app.core.security.password import hash_password
 from app.modules.drivers.models import Driver
 from app.modules.drivers.repository import DriverRepository
 from app.modules.drivers.schemas import DriverCreate, DriverUpdate
+from app.modules.status_history.service import StatusHistoryService
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
-from app.shared.enums import DriverStatus, UserRole
+from app.shared.enums import (
+    DriverStatus,
+    StatusChangeSource,
+    StatusEntityType,
+    UserRole,
+)
 from app.shared.exceptions.custom import (
     ConflictException,
     ForbiddenException,
@@ -122,11 +128,28 @@ class DriverService:
         items, total = await self._repo.list(params, status, search)
         return PagedResponse.create(items, total, params)
 
+    async def list_cnh_alerts(
+        self, requesting_user: User, days_ahead: int = 30
+    ) -> list[Driver]:
+        assert_catalog_read_access(requesting_user)
+        return await self._repo.list_cnh_alerts(days_ahead)
+
     async def update(self, driver_id: uuid.UUID, data: DriverUpdate, updated_by: User) -> Driver:
         self._check_write_access(updated_by)
         driver = await self.get_by_id(driver_id, updated_by)
-        for field, value in data.model_dump(exclude_none=True).items():
+        old_status = driver.status
+        fields = data.model_dump(exclude_none=True)
+        for field, value in fields.items():
             setattr(driver, field, value)
+        if "status" in fields and driver.status != old_status:
+            await StatusHistoryService(self._session, self._tenant_id).record(
+                entity_type=StatusEntityType.DRIVER,
+                entity_id=driver.id,
+                from_status=old_status.value,
+                to_status=driver.status.value,
+                source=StatusChangeSource.API,
+                user_id=updated_by.id,
+            )
         driver = await self._repo.update(driver)
         await self._session.commit()
         return driver

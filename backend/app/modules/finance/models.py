@@ -36,6 +36,7 @@ class FinanceEntry(TenantMixin, SoftDeleteMixin, BaseModel):
     # Substitui o uso de observacoes como source key.
     source_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    forma_pagamento: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
 
 class FixedExpense(TenantMixin, SoftDeleteMixin, BaseModel):

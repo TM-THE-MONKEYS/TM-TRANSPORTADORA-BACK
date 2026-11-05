@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, with_loader_criteria
 
-from app.modules.freights.models import Freight, FreightAttachment, FreightCost, FreightStop
+from app.modules.freights.models import (
+    Freight,
+    FreightAttachment,
+    FreightCost,
+    FreightStop,
+)
 from app.shared.base_repository import TenantBaseRepository
 from app.shared.enums import FinanceEntryStatus, FinanceEntryType, FreightStatus
 from app.shared.filters.competencia import freight_competencia_filter_clause
@@ -39,6 +44,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
                 selectinload(Freight.costs),
                 selectinload(Freight.attachments),
                 selectinload(Freight.stops),
+                *_active_child_criteria(),
             )
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
@@ -66,7 +72,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
             query = query.where(freight_competencia_filter_clause(competencia_ano, competencia_mes))
         total = await self._count(query)
         result = await self._session.execute(
-            query.options(selectinload(Freight.stops))
+            query.options(selectinload(Freight.stops), *_active_child_criteria())
             .order_by(Freight.created_at.desc())
             .offset(params.offset)
             .limit(params.limit)
@@ -100,7 +106,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
                 freight_competencia_filter_clause(competencia_ano, competencia_mes)
             )
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         is_overdue = (
             Freight.data_entrega_prevista.isnot(None)
             & (Freight.data_entrega_prevista < now_utc)
@@ -146,6 +152,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
             .where(
                 FreightCost.freight_id == freight_id,
                 FreightCost.tenant_id == self._tenant_id,
+                FreightCost.deleted_at.is_(None),
             )
             .order_by(FreightCost.created_at.desc())
         )
@@ -201,3 +208,11 @@ class FreightRepository(TenantBaseRepository[Freight]):
             query = query.where(Freight.status == status)
         result = await self._session.execute(query)
         return float(result.scalar_one() or 0.0)
+
+
+def _active_child_criteria() -> tuple[object, ...]:
+    return (
+        with_loader_criteria(FreightCost, FreightCost.deleted_at.is_(None)),
+        with_loader_criteria(FreightAttachment, FreightAttachment.deleted_at.is_(None)),
+        with_loader_criteria(FreightStop, FreightStop.deleted_at.is_(None)),
+    )

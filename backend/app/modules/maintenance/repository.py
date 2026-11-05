@@ -61,16 +61,46 @@ class MaintenanceRepository(TenantBaseRepository[Maintenance]):
         return list(result.scalars().all()), total
 
     async def get_upcoming_alerts(self, days_ahead: int = 30) -> list[Maintenance]:
+        """Alertas por data_prevista OU por km_proxima (com margem)."""
         from datetime import timedelta
+
+        from sqlalchemy.orm import aliased
+
+        from app.core.config.settings import get_settings
+        from app.modules.trucks.models import Truck
+
         cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
+        margin = get_settings().maintenance_km_alert_margin
+        truck = aliased(Truck)
+
+        by_date = (
+            Maintenance.deleted_at.is_(None)
+            & (Maintenance.tenant_id == self._tenant_id)
+            & (Maintenance.status == MaintenanceStatus.AGENDADA)
+            & (Maintenance.data_prevista.isnot(None))
+            & (Maintenance.data_prevista <= cutoff)
+        )
+        by_km = (
+            Maintenance.deleted_at.is_(None)
+            & (Maintenance.tenant_id == self._tenant_id)
+            & (Maintenance.status == MaintenanceStatus.AGENDADA)
+            & Maintenance.km_proxima.isnot(None)
+            & truck.deleted_at.is_(None)
+            & (truck.km_atual >= Maintenance.km_proxima - margin)
+        )
+
         result = await self._session.execute(
             select(Maintenance)
-            .where(
-                Maintenance.deleted_at.is_(None),
-                Maintenance.tenant_id == self._tenant_id,
-                Maintenance.status == MaintenanceStatus.AGENDADA,
-                Maintenance.data_prevista <= cutoff,
-            )
-            .order_by(Maintenance.data_prevista)
+            .outerjoin(truck, truck.id == Maintenance.truck_id)
+            .where(or_(by_date, by_km))
+            .order_by(Maintenance.data_prevista.nulls_last())
         )
-        return list(result.scalars().all())
+        # Dedup por id (pode casar nos dois critérios).
+        seen: set[uuid.UUID] = set()
+        items: list[Maintenance] = []
+        for row in result.scalars().all():
+            if row.id in seen:
+                continue
+            seen.add(row.id)
+            items.append(row)
+        return items

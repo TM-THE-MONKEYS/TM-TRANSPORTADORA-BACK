@@ -162,6 +162,30 @@ class TruckFrontendRead(BaseModel):
         )
 
 
+class ConsumptionSegmentRead(BaseModel):
+    from_refill_id: uuid.UUID
+    to_refill_id: uuid.UUID
+    km_start: float
+    km_end: float
+    km_rodado: float
+    litros: float
+    km_l: float
+
+
+class TruckConsumptionRead(BaseModel):
+    truck_id: uuid.UUID
+    plate: str
+    consumo_cadastrado_km_l: float | None
+    consumo_real_km_l: float | None
+    desvio_pct: float | None
+    desvio_relevante: bool
+    km_rodado_total: float
+    custo_combustivel: float
+    custo_pedagio: float
+    custo_por_km: float | None
+    segmentos: list[ConsumptionSegmentRead]
+
+
 class TruckFrontendListItem(BaseModel):
     id: uuid.UUID
     tenant_id: str = "default"
