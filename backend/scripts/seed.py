@@ -24,22 +24,38 @@ settings = get_settings()
 
 async def seed_admin_user(session: AsyncSession) -> None:
     from sqlalchemy import select
-    result = await session.execute(select(User).where(User.email == "admin@tmtransportadora.com.br"))
+
+    # Produção: nunca cria nem altera usuário. A conta admin do cliente permanece intacta.
+    if settings.app_env == "production":
+        log.info("seed_admin_skipped", reason="production")
+        return
+
+    email = settings.seed_admin_email.strip()
+    password = settings.seed_admin_password
+    if not email or not password:
+        log.info(
+            "seed_admin_skipped",
+            reason="defina SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD só no ambiente local",
+        )
+        return
+
+    result = await session.execute(select(User).where(User.email == email))
     existing = result.scalar_one_or_none()
     if existing:
-        log.info("admin_user_exists", email="admin@tmtransportadora.com.br")
+        # Usuário já existe: não mexe em senha, role nem dados.
+        log.info("admin_user_exists")
         return
 
     admin = User(
         nome="Administrador",
-        email="admin@tmtransportadora.com.br",
-        hashed_password=hash_password("Admin@123!"),
+        email=email,
+        hashed_password=hash_password(password),
         role=UserRole.ADMIN,
         is_active=True,
     )
     session.add(admin)
     await session.commit()
-    log.info("admin_user_created", email="admin@tmtransportadora.com.br")
+    log.info("admin_user_created")
 
 
 async def main() -> None:

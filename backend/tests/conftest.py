@@ -103,7 +103,7 @@ async def admin_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     user = User(
         nome="Admin Test",
         email="admin@test.com",
-        hashed_password=hash_password("Admin@123!"),
+        hashed_password=hash_password("test-admin-password"),
         role=UserRole.ADMIN,
         is_active=True,
         tenant_id=test_tenant.id,

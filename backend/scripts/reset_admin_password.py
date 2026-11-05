@@ -11,24 +11,33 @@ import app.modules.auth.models  # noqa: F401
 import app.modules.tenants.models  # noqa: F401
 from sqlalchemy import select
 
+from app.core.config.settings import get_settings
 from app.core.database.session import AsyncSessionLocal
 from app.core.security.password import hash_password
 from app.modules.users.models import User
 
-ADMIN_EMAIL = "admin@tmtransportadora.com.br"
-ADMIN_PASSWORD = "Admin@123!"
-
 
 async def main() -> None:
+    settings = get_settings()
+    if settings.app_env == "production":
+        print("refused: reset_admin_password não roda em produção")
+        raise SystemExit(1)
+
+    email = settings.seed_admin_email.strip()
+    password = settings.seed_admin_password
+    if not email or not password:
+        print("seed_admin_missing: defina SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD no ambiente local")
+        raise SystemExit(1)
+
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(User).where(User.email == ADMIN_EMAIL))
+        result = await session.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
         if not user:
-            print(f"user_not_found:{ADMIN_EMAIL}")
-            return
-        user.hashed_password = hash_password(ADMIN_PASSWORD)
+            print("user_not_found")
+            raise SystemExit(1)
+        user.hashed_password = hash_password(password)
         await session.commit()
-        print(f"password_reset_ok:{ADMIN_EMAIL}")
+        print("password_reset_ok")
 
 
 if __name__ == "__main__":

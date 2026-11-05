@@ -195,7 +195,7 @@ Público. Sem autenticação.
 
 **Body:**
 ```json
-{ "email": "admin@tmtransportadora.com.br", "password": "Admin@123!" }
+{ "email": "usuario@example.com", "password": "<senha>" }
 ```
 
 **Resposta 200:** `LoginResponse`
@@ -1357,11 +1357,7 @@ const freights = await api<PagedResponse<FreightListItem>>(
 
 ## Credenciais de desenvolvimento (seed)
 
-| Campo | Valor |
-|-------|-------|
-| Email | `admin@tmtransportadora.com.br` |
-| Senha | `Admin@123!` |
-| Role | `admin` |
+O seed não grava e-mail nem senha no repositório. No ambiente local, use `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`.
 
 ---
 

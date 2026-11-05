@@ -481,15 +481,9 @@ poetry run celery -A app.workers.celery_app:celery_app worker --beat --loglevel=
 
 ---
 
-## Credenciais Padrão (seed)
+## Seed local
 
-| Campo | Valor |
-|---|---|
-| Email | `admin@tmtransportadora.com.br` |
-| Senha | `Admin@123!` |
-| Role | `admin` |
-
-> **Atenção:** Troque imediatamente em produção!
+`scripts/seed.py` só cria o admin se `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD` estiverem no ambiente (arquivo `.env`, fora do git). O repositório não traz e-mail nem senha.
 
 ---
 

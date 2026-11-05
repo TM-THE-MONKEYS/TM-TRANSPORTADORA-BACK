@@ -16,7 +16,7 @@ def _extract_tokens(data: dict) -> tuple[str, str]:
 async def test_login_success(client: AsyncClient, admin_user: object) -> None:
     response = await client.post(
         "/api/v1/auth/login",
-        json={"email": "admin@test.com", "password": "Admin@123!"},
+        json={"email": "admin@test.com", "password": "test-admin-password"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -50,7 +50,7 @@ async def test_login_nonexistent_user(client: AsyncClient) -> None:
 async def test_refresh_token(client: AsyncClient, admin_user: object) -> None:
     login_resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "admin@test.com", "password": "Admin@123!"},
+        json={"email": "admin@test.com", "password": "test-admin-password"},
     )
     assert login_resp.status_code == 200
     _, refresh_token = _extract_tokens(login_resp.json())
@@ -68,7 +68,7 @@ async def test_refresh_token(client: AsyncClient, admin_user: object) -> None:
 async def test_logout(client: AsyncClient, admin_user: object) -> None:
     login_resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "admin@test.com", "password": "Admin@123!"},
+        json={"email": "admin@test.com", "password": "test-admin-password"},
     )
     _, refresh_token = _extract_tokens(login_resp.json())
 
@@ -95,7 +95,7 @@ async def test_change_password_success(
 ) -> None:
     response = await client.post(
         "/api/v1/auth/change-password",
-        json={"current_password": "Admin@123!", "new_password": "NewAdmin@456!"},
+        json={"current_password": "test-admin-password", "new_password": "NewAdmin@456!"},
         headers=admin_headers,
     )
     assert response.status_code == 200

@@ -118,4 +118,4 @@ Write-Host '  Health: http://localhost:8000/health'
 Write-Host '  Logs:   docker compose logs -f api'
 Write-Host '  Parar:  docker compose down'
 Write-Host ''
-Write-Host 'Login seed: admin@tmtransportadora.com.br / Admin@123!' -ForegroundColor DarkGray
+Write-Host 'O seed so cria admin se SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD estiverem no ambiente local.' -ForegroundColor DarkGray

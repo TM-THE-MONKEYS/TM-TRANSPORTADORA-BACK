@@ -19,13 +19,7 @@
 
 ### Conta de administrador
 
-| Campo | Valor |
-|---|---|
-| **Email** | `admin@tmtransportadora.com.br` |
-| **Senha** | `TM@Admin2026!` |
-| **Role** | `admin` |
-
-> **Altere a senha após o primeiro login** via `PATCH /api/v1/auth/change-password`.
+A conta de admin não fica neste documento. E-mail e senha existem só no ambiente de execução, fora do git. Troque a senha pelo `PATCH /api/v1/auth/change-password`.
 
 ---
 
@@ -146,7 +140,7 @@ Authorization: Bearer <access_token>
 POST /auth/login
 Content-Type: application/json
 
-{ "email": "admin@tmtransportadora.com.br", "password": "TM@Admin2026!" }
+{ "email": "usuario@example.com", "password": "<senha>" }
 ```
 
 **Resposta:**
@@ -160,7 +154,7 @@ Content-Type: application/json
   },
   "user": {
     "id": "uuid",
-    "email": "admin@tmtransportadora.com.br",
+    "email": "usuario@example.com",
     "name": "Administrador",
     "role": "admin",
     "tenant_id": "uuid",
@@ -406,7 +400,7 @@ NEXT_PUBLIC_API_URL=https://api-production-a071.up.railway.app/api/v1
 | Tabela | Registros |
 |---|---|
 | `tm_tenants` | 1 (Transportadora TM) |
-| `tm_users` | 1 (admin@tmtransportadora.com.br) |
+| `tm_users` | 1 (admin do tenant) |
 | Todos os outros | 0 (limpos) |
 
 Todas as tabelas foram mantidas. Apenas os dados de teste foram removidos.
