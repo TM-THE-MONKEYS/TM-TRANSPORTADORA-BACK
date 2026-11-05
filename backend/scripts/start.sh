@@ -7,9 +7,13 @@ echo "Starting TM Transportadora Backend"
 echo "Running database migrations..."
 alembic upgrade head
 
-# Seed database (only on first run)
-echo "Seeding database..."
-python scripts/seed.py
+# Seed só em ambiente local/dev. Em produção o script no-op e não toca na conta admin.
+if [ "${APP_ENV:-development}" != "production" ]; then
+  echo "Seeding database (non-production)..."
+  python scripts/seed.py
+else
+  echo "Skipping seed in production (admin account untouched)."
+fi
 
 # Start the server
 echo "Starting API server..."
