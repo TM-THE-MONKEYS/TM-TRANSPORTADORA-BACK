@@ -81,7 +81,7 @@ class TrackingFreightSummary(BaseModel):
     origin_state: str
     destination_city: str
     destination_state: str
-    value_brl: float
+    value_brl: float | None = None
 
 
 class TrackingFreightDetailResponse(BaseModel):
@@ -95,4 +95,4 @@ class TrackingFreightDetailResponse(BaseModel):
     unread_notifications: int = 0
     fuel_refills: list[FuelRefillRead] = []
     fuel_total_litros: float = 0.0
-    fuel_total_valor: float = 0.0
+    fuel_total_valor: float | None = 0.0

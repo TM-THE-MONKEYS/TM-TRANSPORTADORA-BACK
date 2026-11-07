@@ -15,7 +15,11 @@
 | **URL base** | `https://api-production-a071.up.railway.app` |
 | **Health check** | `https://api-production-a071.up.railway.app/health` |
 | **Docs (dev)** | Desabilitadas em produção (`APP_ENV=production`) |
-| **Região** | US East (iad) — Virginia, mais próxima ao Brasil disponível no Railway |
+| **Região** | US East (`iad`) — Virginia (deploy atual) |
+| **DB** | Supabase Postgres pooler **SA East** (`sa-east-1`) |
+
+> **Latência (medido 2026-11-07, cliente BR):** health API Railway ≈ **2,3–2,4 s** RTT; TCP ao pooler Supabase `sa-east-1:5432` ≈ **25–36 ms**. Cada round-trip API→DB paga o hop **iad ↔ sa-east-1**.  
+> **Região SA (2026-11-07):** Julio aprovou mover para South America. Tentativa via API Railway: **região SA indisponível** neste workspace. Regiões disponíveis: `sin`, `pdx`, `ams`, `sfo`, `iad`. Mantido **`iad`** (melhor opção entre as disponíveis vs. Brasil/Supabase SA East). Redis permanece em `iad` (volume preso à região). Reavaliar quando Railway liberar região SA no plano.
 
 ### Conta de administrador
 

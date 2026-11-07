@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -26,6 +27,18 @@ class CompetenciaReportResponse(BaseModel):
     cash_flow: CashFlowResponse
     daily_series: list[DailyCompetenciaPoint]
     expenses_by_category: list[CategoryAmount]
+
+
+class CompetenciaReportJobAccepted(BaseModel):
+    job_id: str
+    status: Literal["pending"] = "pending"
+
+
+class CompetenciaReportJobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "started", "success", "failure"]
+    result: CompetenciaReportResponse | None = None
+    error: str | None = None
 
 
 class FixedExpenseLaunchStatusItem(BaseModel):

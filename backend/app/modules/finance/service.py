@@ -45,6 +45,9 @@ class FinanceService:
         entry = FinanceEntry(**data.model_dump())
         entry = await self._repo.create(entry)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         log.info("finance_entry_created", entry_id=str(entry.id), tipo=data.tipo.value)
         return entry
 
@@ -95,6 +98,9 @@ class FinanceService:
             setattr(entry, field, value)
         entry = await self._repo.update(entry)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         return entry
 
     async def delete(self, entry_id: uuid.UUID, deleted_by: User) -> None:
@@ -104,6 +110,9 @@ class FinanceService:
             raise NotFoundException("Lançamento não encontrado")
         await self._repo.soft_delete(entry)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
 
     async def get_cash_flow(
         self,
@@ -119,13 +128,12 @@ class FinanceService:
         )
         return CashFlowResponse(**summary)
 
-    async def get_competencia_report(
+    async def build_competencia_report(
         self,
-        requesting_user: User,
         competencia_mes: int,
         competencia_ano: int,
     ) -> CompetenciaReportResponse:
-        self._check_read_access(requesting_user)
+        """Compute competência report (no auth) — used by sync path and Celery."""
         summary = await self._repo.get_cash_flow_summary(competencia_mes, competencia_ano)
         daily, by_category = await self._repo.get_competencia_aggregates(
             competencia_mes, competencia_ano
@@ -150,6 +158,30 @@ class FinanceService:
             expenses_by_category=expenses_by_category,  # type: ignore[arg-type]
         )
 
+    async def get_competencia_report(
+        self,
+        requesting_user: User,
+        competencia_mes: int,
+        competencia_ano: int,
+    ) -> CompetenciaReportResponse:
+        self._check_read_access(requesting_user)
+        return await self.build_competencia_report(competencia_mes, competencia_ano)
+
+    def enqueue_competencia_report(
+        self,
+        requesting_user: User,
+        competencia_mes: int,
+        competencia_ano: int,
+    ) -> str:
+        """Enqueue Celery job; returns job_id. Caller may fall back to sync."""
+        self._check_read_access(requesting_user)
+        from app.workers.tasks import compute_competencia_report
+
+        async_result = compute_competencia_report.delay(
+            str(self._tenant_id), competencia_mes, competencia_ano
+        )
+        return str(async_result.id)
+
     async def sync_from_freights(self, requesting_user: User) -> dict[str, int]:
         """Importa receitas de fretes e despesas (abastecimentos/custos) para o financeiro."""
         self._check_write_access(requesting_user)
@@ -157,5 +189,8 @@ class FinanceService:
 
         stats = await sync_all_from_freights(self._session, self._tenant_id)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         log.info("finance_sync_from_freights", **stats)
         return stats

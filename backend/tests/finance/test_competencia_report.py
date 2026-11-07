@@ -52,12 +52,22 @@ async def test_competencia_report(
     )
     assert create.status_code == 201
 
-    response = await client.get(
+    enqueued = await client.get(
         f"/api/v1/finance/competencia-report?competencia_mes={today.month}&competencia_ano={today.year}",
         headers=headers,
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert enqueued.status_code == 202, enqueued.text
+    job_id = enqueued.json()["job_id"]
+    assert job_id
+
+    response = await client.get(
+        f"/api/v1/finance/competencia-report/jobs/{job_id}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "success"
+    data = payload["result"]
     assert data["competencia_mes"] == today.month
     assert data["competencia_ano"] == today.year
     assert "cash_flow" in data
@@ -123,6 +133,7 @@ async def test_competencia_report_rejects_too_far_ahead(
         f"/api/v1/finance/competencia-report?competencia_mes={month}&competencia_ano={year}",
         headers=headers,
     )
+    # Validação de competência ocorre na dependency antes do enqueue.
     assert response.status_code == 400
     assert "2 meses à frente" in response.json()["detail"]
 

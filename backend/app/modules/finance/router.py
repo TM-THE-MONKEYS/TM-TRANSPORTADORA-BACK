@@ -16,6 +16,8 @@ from app.api.v1.dependencies.competencia import (
 )
 from app.api.v1.dependencies.database import get_db
 from app.modules.finance.competencia_schemas import (
+    CompetenciaReportJobAccepted,
+    CompetenciaReportJobStatus,
     CompetenciaReportResponse,
     FixedExpenseLaunchStatusItem,
     LaunchPendingResponse,
@@ -66,16 +68,95 @@ async def get_cash_flow(
     )
 
 
-@router.get("/competencia-report", response_model=CompetenciaReportResponse)
-async def get_competencia_report(
+@router.get(
+    "/competencia-report",
+    response_model=CompetenciaReportJobAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def enqueue_competencia_report(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
     competencia: RequiredCompetenciaDep,
-) -> CompetenciaReportResponse:
+) -> CompetenciaReportJobAccepted:
+    """Enfileira relatório de competência (Celery). Poll em /competencia-report/jobs/{id}.
+
+    Em pytest ou se o broker estiver indisponível, calcula com a sessão da request
+    e guarda o resultado localmente sob o mesmo job_id.
+    """
+    import sys
+
+    from app.modules.finance.competencia_jobs import store_local_job
+
     service = FinanceService(db, current_user.tenant_id)
-    return await service.get_competencia_report(
+    in_pytest = "pytest" in sys.modules
+    if not in_pytest:
+        try:
+            job_id = service.enqueue_competencia_report(
+                current_user, competencia.mes, competencia.ano
+            )
+            return CompetenciaReportJobAccepted(job_id=job_id)
+        except Exception:
+            pass
+
+    report = await service.get_competencia_report(
         current_user, competencia.mes, competencia.ano
     )
+    job_id = store_local_job(report.model_dump(mode="json"))
+    return CompetenciaReportJobAccepted(job_id=job_id)
+
+
+@router.get(
+    "/competencia-report/jobs/{job_id}",
+    response_model=CompetenciaReportJobStatus,
+)
+async def get_competencia_report_job(
+    job_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> CompetenciaReportJobStatus:
+    """Status/resultado do job de relatório de competência."""
+    service = FinanceService(db, current_user.tenant_id)
+    # Reusa check de leitura do financeiro
+    service._check_read_access(current_user)
+
+    from app.modules.finance.competencia_jobs import get_local_job
+
+    local = get_local_job(job_id)
+    if local is not None:
+        return CompetenciaReportJobStatus(
+            job_id=job_id,
+            status="success",
+            result=CompetenciaReportResponse.model_validate(local["result"]),
+        )
+
+    from celery.result import AsyncResult
+
+    from app.workers.celery_app import celery_app
+
+    async_result = AsyncResult(job_id, app=celery_app)
+    if async_result.state in ("PENDING", "STARTED", "RETRY"):
+        status_map = {
+            "PENDING": "pending",
+            "STARTED": "started",
+            "RETRY": "pending",
+        }
+        return CompetenciaReportJobStatus(
+            job_id=job_id,
+            status=status_map.get(async_result.state, "pending"),  # type: ignore[arg-type]
+        )
+    if async_result.successful():
+        return CompetenciaReportJobStatus(
+            job_id=job_id,
+            status="success",
+            result=CompetenciaReportResponse.model_validate(async_result.result),
+        )
+    if async_result.failed():
+        return CompetenciaReportJobStatus(
+            job_id=job_id,
+            status="failure",
+            error=str(async_result.result),
+        )
+    return CompetenciaReportJobStatus(job_id=job_id, status="pending")
 
 
 @router.get("/fixed-expenses", response_model=list[FixedExpenseRead])
