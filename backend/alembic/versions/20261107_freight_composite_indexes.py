@@ -1,6 +1,6 @@
 """Composite indexes for freights list/competência filters.
 
-Revision ID: 20261107_freight_composite_indexes
+Revision ID: 20261107_freight_idx
 Revises: 20261030_driver_user_id_unique
 """
 from __future__ import annotations
@@ -9,7 +9,8 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "20261107_freight_composite_indexes"
+# alembic_version.version_num is VARCHAR(32) — keep revision id <= 32 chars.
+revision: str = "20261107_freight_idx"
 down_revision: Union[str, Sequence[str], None] = "20261030_driver_user_id_unique"
 branch_labels = None
 depends_on = None
