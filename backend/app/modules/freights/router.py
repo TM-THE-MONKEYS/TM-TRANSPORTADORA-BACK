@@ -27,6 +27,7 @@ from app.modules.users.models import User
 from app.shared.enums import FreightStatus
 from app.shared.exceptions.custom import BadRequestException
 from app.shared.pagination import PagedResponse, PageParams
+from app.shared.security.resource_access import should_redact_freight_financials
 
 router = APIRouter(prefix="/freights", tags=["freights"])
 
@@ -102,7 +103,10 @@ async def list_freights(
         competencia.ano,
         search,
     )
-    frontend_items = [FreightFrontendListItem.from_orm(f) for f in result.items]
+    hide = should_redact_freight_financials(current_user)
+    frontend_items = [
+        FreightFrontendListItem.from_orm(f, hide_financial=hide) for f in result.items
+    ]
     return PagedResponse.create(frontend_items, result.total, params)
 
 
@@ -114,7 +118,9 @@ async def create_freight(
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
     freight = await service.create(payload, current_user)
-    return FreightFrontendRead.from_orm(freight)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
 
 
 @router.get("/{freight_id}", response_model=FreightFrontendRead)
@@ -125,7 +131,9 @@ async def get_freight(
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
     freight = await service.get_by_id(freight_id, current_user)
-    return FreightFrontendRead.from_orm(freight)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
 
 
 @router.patch("/{freight_id}", response_model=FreightFrontendRead)
@@ -137,7 +145,9 @@ async def update_freight(
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
     freight = await service.update(freight_id, payload, current_user)
-    return FreightFrontendRead.from_orm(freight)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
 
 
 @router.post("/{freight_id}/advance-status", response_model=FreightFrontendRead)
@@ -148,7 +158,9 @@ async def advance_freight_status(
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
     freight = await service.advance_status(freight_id, current_user)
-    return FreightFrontendRead.from_orm(freight)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
 
 
 @router.patch("/{freight_id}/status", response_model=FreightFrontendRead)
@@ -160,7 +172,9 @@ async def update_freight_status(
 ) -> FreightFrontendRead:
     service = FreightService(db, current_user.tenant_id)
     freight = await service.update_status(freight_id, payload.status, current_user)
-    return FreightFrontendRead.from_orm(freight)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
 
 
 @router.delete(
@@ -187,7 +201,8 @@ async def list_freight_costs(
     """Custos do frete (inclui combustível gerado por abastecimentos)."""
     service = FreightService(db, current_user.tenant_id)
     costs = await service.list_costs(freight_id, current_user)
-    return costs
+    hide = should_redact_freight_financials(current_user)
+    return [FreightCostRead.from_orm(c, hide_financial=hide) for c in costs]
 
 
 @router.post("/{freight_id}/costs", response_model=FreightCostRead, status_code=status.HTTP_201_CREATED)

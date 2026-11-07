@@ -97,14 +97,25 @@ class FreightCostRead(BaseModel):
     id: uuid.UUID
     freight_id: uuid.UUID
     tipo: str
-    valor: float
+    valor: float | None
     descricao: str | None
     created_at: datetime
+
+    @classmethod
+    def from_orm(cls, cost: object, *, hide_financial: bool = False) -> "FreightCostRead":
+        return cls(
+            id=cost.id,  # type: ignore[attr-defined]
+            freight_id=cost.freight_id,  # type: ignore[attr-defined]
+            tipo=cost.tipo,  # type: ignore[attr-defined]
+            valor=None if hide_financial else float(cost.valor),  # type: ignore[attr-defined]
+            descricao=cost.descricao,  # type: ignore[attr-defined]
+            created_at=cost.created_at,  # type: ignore[attr-defined]
+        )
 
 
 class FreightCostsSummaryItem(BaseModel):
     freight_id: uuid.UUID
-    total_costs: float
+    total_costs: float | None
 
 
 class FreightAttachmentRead(BaseModel):
@@ -265,7 +276,7 @@ class FreightFrontendRead(BaseModel):
     stops: list[FreightStopRead] = []
     cargo_description: str
     weight_kg: float = 0.0
-    value_brl: float
+    value_brl: float | None
     freight_type: str = "carga_geral"
     status: FreightStatus
     deadline_at: str | None = None
@@ -276,7 +287,9 @@ class FreightFrontendRead(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, freight: object) -> "FreightFrontendRead":
+    def from_orm(
+        cls, freight: object, *, hide_financial: bool = False
+    ) -> "FreightFrontendRead":
         origem = freight.origem or {}  # type: ignore[attr-defined]
         destino = freight.destino or {}  # type: ignore[attr-defined]
         code = f"OF-{str(freight.id)[:8].upper()}"  # type: ignore[attr-defined]
@@ -299,7 +312,7 @@ class FreightFrontendRead(BaseModel):
             destination_cep=destino.get("cep"),
             stops=stops,
             cargo_description=freight.observacoes or "Carga não especificada",  # type: ignore[attr-defined]
-            value_brl=freight.valor_frete,  # type: ignore[attr-defined]
+            value_brl=None if hide_financial else float(freight.valor_frete),  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
             deadline_at=format_date_only_iso(deadline),
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
@@ -329,7 +342,7 @@ class FreightFrontendListItem(BaseModel):
     destination_city: str
     destination_state: str
     stops: list[FreightStopRead] = []
-    value_brl: float
+    value_brl: float | None
     status: FreightStatus
     truck_id: uuid.UUID | None = None
     driver_id: uuid.UUID | None = None
@@ -337,7 +350,9 @@ class FreightFrontendListItem(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, freight: object) -> "FreightFrontendListItem":
+    def from_orm(
+        cls, freight: object, *, hide_financial: bool = False
+    ) -> "FreightFrontendListItem":
         origem = freight.origem or {}  # type: ignore[attr-defined]
         destino = freight.destino or {}  # type: ignore[attr-defined]
         stops_raw = getattr(freight, "stops", None) or []
@@ -351,7 +366,7 @@ class FreightFrontendListItem(BaseModel):
             destination_city=destino.get("cidade", ""),
             destination_state=destino.get("estado", ""),
             stops=stops,
-            value_brl=freight.valor_frete,  # type: ignore[attr-defined]
+            value_brl=None if hide_financial else float(freight.valor_frete),  # type: ignore[attr-defined]
             status=freight.status,  # type: ignore[attr-defined]
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
             driver_id=freight.driver_id,  # type: ignore[attr-defined]

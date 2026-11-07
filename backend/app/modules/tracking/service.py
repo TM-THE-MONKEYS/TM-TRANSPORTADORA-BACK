@@ -29,7 +29,10 @@ from app.modules.trucks.models import Truck
 from app.modules.users.models import User
 from app.shared.enums import TRACKING_STATUS_LABELS, TrackingStatus, UserRole
 from app.shared.exceptions.custom import ForbiddenException, NotFoundException
-from app.shared.security.resource_access import assert_freight_read_access
+from app.shared.security.resource_access import (
+    assert_freight_read_access,
+    should_redact_freight_financials,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -155,6 +158,7 @@ class TrackingService:
             truck = await self._session.get(Truck, freight.truck_id)
             truck_plate = truck.placa if truck else None
 
+        hide_financial = should_redact_freight_financials(user)
         origem = freight.origem or {}
         destino = freight.destino or {}
         summary = TrackingFreightSummary(
@@ -171,7 +175,7 @@ class TrackingService:
             origin_state=origem.get("estado", ""),
             destination_city=destino.get("cidade", ""),
             destination_state=destino.get("estado", ""),
-            value_brl=freight.valor_frete,
+            value_brl=None if hide_financial else float(freight.valor_frete),
         )
 
         updates = await self._repo.get_by_freight(freight_id)
@@ -186,7 +190,12 @@ class TrackingService:
             freight_id, limit=50, offset=0
         )
         fuel_service = FuelService(self._session, self._tenant_id)
-        fuel_reads = [await fuel_service._enrich_read(r) for r in fuel_items]
+        fuel_reads = await fuel_service._enrich_reads(fuel_items)
+        if hide_financial:
+            fuel_reads = [
+                r.model_copy(update={"valor_total": 0.0, "valor_litro": None})
+                for r in fuel_reads
+            ]
         total_litros, total_valor, _ = await self._fuel_repo.summarize_freight(freight_id)
 
         return TrackingFreightDetailResponse(
@@ -198,5 +207,5 @@ class TrackingService:
             unread_notifications=unread,
             fuel_refills=fuel_reads,
             fuel_total_litros=total_litros,
-            fuel_total_valor=total_valor,
+            fuel_total_valor=None if hide_financial else total_valor,
         )

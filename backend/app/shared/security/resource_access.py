@@ -77,3 +77,14 @@ def assert_catalog_read_access(user: User) -> None:
     """Cadastros (clientes, motoristas, caminhões, manutenção) — motorista sem leitura."""
     if user.role not in _CATALOG_READ_ROLES:
         raise ForbiddenException("Acesso negado")
+
+
+def should_redact_freight_financials(user: User) -> bool:
+    """Motorista nunca recebe valores monetários de frete (valor, custos, resumos)."""
+    return user.role == UserRole.MOTORISTA
+
+
+def assert_freight_summary_access(user: User) -> None:
+    """Resumo financeiro de fretes (faturamento/gastos/margem) — motorista bloqueado."""
+    if should_redact_freight_financials(user):
+        raise ForbiddenException("Acesso negado ao resumo financeiro de fretes")

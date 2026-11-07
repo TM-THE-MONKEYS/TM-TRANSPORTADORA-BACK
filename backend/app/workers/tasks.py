@@ -161,6 +161,41 @@ def launch_monthly_fixed_expenses(self) -> dict[str, int]:  # type: ignore[no-un
         raise self.retry(exc=exc, countdown=3600)
 
 
+@celery_app.task(name="app.workers.tasks.compute_competencia_report", bind=True, max_retries=2)
+def compute_competencia_report(  # type: ignore[no-untyped-def]
+    self,
+    tenant_id: str,
+    competencia_mes: int,
+    competencia_ano: int,
+) -> dict:
+    """Heavy competência report — runs off the request thread."""
+    async def _run() -> dict:
+        import uuid as _uuid
+
+        from app.core.database.session import AsyncSessionLocal
+        from app.modules.finance.service import FinanceService
+
+        async with AsyncSessionLocal() as session:
+            service = FinanceService(session, _uuid.UUID(tenant_id))
+            report = await service.build_competencia_report(
+                competencia_mes, competencia_ano
+            )
+            return report.model_dump(mode="json")
+
+    try:
+        result = _run_async(_run())
+        log.info(
+            "competencia_report_computed",
+            tenant_id=tenant_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+        )
+        return result
+    except Exception as exc:
+        log.exception("compute_competencia_report_failed", exc=str(exc))
+        raise self.retry(exc=exc, countdown=30)
+
+
 @celery_app.task(name="app.workers.tasks.cleanup_expired_tokens", bind=True, max_retries=3)
 def cleanup_expired_tokens(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
     """Remove expired refresh tokens from database (across all tenants)."""

@@ -22,7 +22,9 @@ from app.shared.exceptions.custom import BadRequestException, ForbiddenException
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
     assert_freight_read_access,
+    assert_freight_summary_access,
     resolve_freight_list_driver_filter,
+    should_redact_freight_financials,
 )
 
 log = structlog.get_logger(__name__)
@@ -137,6 +139,9 @@ class FreightService:
             await self._sync_truck_status(freight.truck_id)
         freight_id = freight.id
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         self._session.expire(freight)
         freight = await self._repo.get_by_id(freight_id, with_relations=True)
         assert freight is not None
@@ -200,11 +205,22 @@ class FreightService:
         competencia_ano: int | None = None,
     ) -> dict[str, float | int]:
         """Resumo agregado para cards — reutilizável por Fretes / Frota / Motoristas."""
+        assert_freight_summary_access(requesting_user)
         driver_id = await resolve_freight_list_driver_filter(
             self._session, requesting_user, driver_id
         )
-        return await self._repo.get_summary(
-            status, driver_id, truck_id, competencia_mes, competencia_ano
+        from app.shared.cache.freight_summary import get_cached_freight_summary
+
+        return await get_cached_freight_summary(
+            self._tenant_id,
+            status=status,
+            driver_id=driver_id,
+            truck_id=truck_id,
+            competencia_mes=competencia_mes,
+            competencia_ano=competencia_ano,
+            compute=lambda: self._repo.get_summary(
+                status, driver_id, truck_id, competencia_mes, competencia_ano
+            ),
         )
 
     async def update(self, freight_id: uuid.UUID, data: FreightUpdate, updated_by: User) -> Freight:
@@ -237,6 +253,9 @@ class FreightService:
                 await self._sync_truck_status(old_truck_id)
             await self._sync_truck_status(freight.truck_id)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         if data.status or data.model_dump(exclude_none=True):
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
             assert freight is not None
@@ -261,6 +280,9 @@ class FreightService:
         await self._repo.soft_delete(freight)
         await self._sync_truck_status(truck_id)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         log.info(
             "freight_deleted",
             freight_id=str(freight_id),
@@ -444,6 +466,9 @@ class FreightService:
             await self._sync_truck_status(freight.truck_id)
         if commit:
             await self._session.commit()
+            from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+            await invalidate_tenant_aggregates_cache(self._tenant_id)
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
             assert freight is not None
         log.info(
@@ -512,10 +537,11 @@ class FreightService:
         totals = await self._repo.sum_costs_by_freight_ids(
             list(accessible), driver_id=driver_filter
         )
+        hide = should_redact_freight_financials(requesting_user)
         return [
             FreightCostsSummaryItem(
                 freight_id=fid,
-                total_costs=totals.get(fid, 0.0),
+                total_costs=None if hide else totals.get(fid, 0.0),
             )
             for fid in unique_ids
             if fid in accessible
@@ -535,4 +561,7 @@ class FreightService:
         cost = await self._repo.add_cost(freight_id, data.tipo, data.valor, data.descricao)
         await create_cost_expense(self._session, cost)
         await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
         return cost

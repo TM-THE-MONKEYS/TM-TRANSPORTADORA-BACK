@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 import structlog
 from sqlalchemy import String, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 from sqlalchemy.sql import Select
 
 from app.modules.freights.models import (
@@ -132,8 +132,23 @@ class FreightRepository(TenantBaseRepository[Freight]):
             search=search,
         )
         total = await self._count(query)
+        # List cards: origem/destino/status/ids/dates — skip heavy text/distance/delivery cols.
+        list_cols = load_only(
+            Freight.id,
+            Freight.tenant_id,
+            Freight.client_id,
+            Freight.driver_id,
+            Freight.truck_id,
+            Freight.origem,
+            Freight.destino,
+            Freight.valor_frete,
+            Freight.status,
+            Freight.created_at,
+            Freight.updated_at,
+            Freight.deleted_at,
+        )
         result = await self._session.execute(
-            query.options(selectinload(Freight.stops))
+            query.options(list_cols, selectinload(Freight.stops))
             .order_by(Freight.created_at.desc())
             .offset(params.offset)
             .limit(params.limit)
