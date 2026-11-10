@@ -271,6 +271,12 @@ async def test_admin_can_start_trip(
     assert body["km_inicial"] == 1500.0
     assert body["value_brl"] == 2500.0
 
+    # Regression: list uses load_only; km_inicial must be selected or async raises 503.
+    list_resp = await client.get("/api/v1/freights", headers=admin_headers)
+    assert list_resp.status_code == 200, list_resp.text
+    listed = next(i for i in list_resp.json()["items"] if i["id"] == str(freight_id))
+    assert listed["km_inicial"] == 1500.0
+
     db_session.expire_all()
     refreshed = await db_session.get(Truck, truck_id)
     assert refreshed is not None

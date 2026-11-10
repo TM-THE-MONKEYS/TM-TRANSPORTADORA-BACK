@@ -133,6 +133,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
         )
         total = await self._count(query)
         # List cards: origem/destino/status/ids/dates — skip heavy text/distance/delivery cols.
+        # Include km_inicial: FreightFrontendListItem reads it; deferred load in async → MissingGreenlet/503.
         list_cols = load_only(
             Freight.id,
             Freight.tenant_id,
@@ -143,6 +144,7 @@ class FreightRepository(TenantBaseRepository[Freight]):
             Freight.destino,
             Freight.valor_frete,
             Freight.status,
+            Freight.km_inicial,
             Freight.created_at,
             Freight.updated_at,
             Freight.deleted_at,
