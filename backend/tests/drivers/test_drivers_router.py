@@ -106,7 +106,17 @@ async def test_create_driver_account_admin_ok(
         json={"cpf": cpf, "password": "Motor@123!"},
     )
     assert login_resp.status_code == 200
-    assert login_resp.json()["user"]["role"] == "motorista"
+    login_user = login_resp.json()["user"]
+    assert login_user["role"] == "motorista"
+    assert login_user["driver_id"] == driver_id
+
+    access_token = login_resp.json()["tokens"]["access_token"]
+    me_resp = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert me_resp.status_code == 200
+    assert me_resp.json()["driver_id"] == driver_id
 
 
 @pytest.mark.asyncio

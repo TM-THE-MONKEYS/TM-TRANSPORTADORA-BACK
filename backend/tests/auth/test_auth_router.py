@@ -87,6 +87,7 @@ async def test_get_me(client: AsyncClient, admin_user: object, admin_headers: di
     assert data["email"] == "admin@test.com"
     assert "permissions" in data
     assert "name" in data
+    assert data.get("driver_id") is None
 
 
 @pytest.mark.asyncio
