@@ -252,6 +252,29 @@ class FreightStatusUpdate(BaseModel):
     status: FreightStatus
 
 
+class FreightStartTrip(BaseModel):
+    """KM inicial + checklist obrigatório para iniciar viagem."""
+
+    km_inicial: float = Field(gt=0)
+    check_docs: bool
+    check_veiculo: bool
+    check_carga: bool
+
+    @model_validator(mode="after")
+    def validate_checks(self) -> "FreightStartTrip":
+        if not (self.check_docs and self.check_veiculo and self.check_carga):
+            raise ValueError(
+                "Todos os checks (documentos, veículo e carga) devem ser confirmados"
+            )
+        return self
+
+
+class FreightOdometerEnd(BaseModel):
+    """KM final ao encerrar odômetro da viagem."""
+
+    km_final: float = Field(gt=0)
+
+
 # ── Frontend-compatible schemas ──────────────────────────────────────────────
 
 class FreightFrontendRead(BaseModel):
@@ -283,6 +306,13 @@ class FreightFrontendRead(BaseModel):
     responsible_id: str | None = None
     truck_id: uuid.UUID | None = None
     driver_id: uuid.UUID | None = None
+    km_inicial: float | None = None
+    km_final: float | None = None
+    km_inicial_registrado_em: str | None = None
+    km_final_registrado_em: str | None = None
+    check_docs: bool = False
+    check_veiculo: bool = False
+    check_carga: bool = False
     created_at: str
     updated_at: str
 
@@ -296,6 +326,8 @@ class FreightFrontendRead(BaseModel):
         deadline = freight.data_entrega_prevista  # type: ignore[attr-defined]
         stops_raw = getattr(freight, "stops", None) or []
         stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
+        km_inicial_at = getattr(freight, "km_inicial_registrado_em", None)
+        km_final_at = getattr(freight, "km_final_registrado_em", None)
         return cls(
             id=freight.id,  # type: ignore[attr-defined]
             code=code,
@@ -317,6 +349,13 @@ class FreightFrontendRead(BaseModel):
             deadline_at=format_date_only_iso(deadline),
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
             driver_id=freight.driver_id,  # type: ignore[attr-defined]
+            km_inicial=getattr(freight, "km_inicial", None),
+            km_final=getattr(freight, "km_final", None),
+            km_inicial_registrado_em=km_inicial_at.isoformat() if km_inicial_at else None,
+            km_final_registrado_em=km_final_at.isoformat() if km_final_at else None,
+            check_docs=bool(getattr(freight, "check_docs", False)),
+            check_veiculo=bool(getattr(freight, "check_veiculo", False)),
+            check_carga=bool(getattr(freight, "check_carga", False)),
             created_at=freight.created_at.isoformat(),  # type: ignore[attr-defined]
             updated_at=freight.updated_at.isoformat(),  # type: ignore[attr-defined]
         )
@@ -346,6 +385,7 @@ class FreightFrontendListItem(BaseModel):
     status: FreightStatus
     truck_id: uuid.UUID | None = None
     driver_id: uuid.UUID | None = None
+    km_inicial: float | None = None
     created_at: str
     updated_at: str
 
@@ -357,6 +397,7 @@ class FreightFrontendListItem(BaseModel):
         destino = freight.destino or {}  # type: ignore[attr-defined]
         stops_raw = getattr(freight, "stops", None) or []
         stops = [FreightStopRead.from_orm(s) for s in sorted(stops_raw, key=lambda s: s.sequence)]
+        km_inicial = getattr(freight, "km_inicial", None)
         return cls(
             id=freight.id,  # type: ignore[attr-defined]
             code=f"OF-{str(freight.id)[:8].upper()}",  # type: ignore[attr-defined]
@@ -370,6 +411,7 @@ class FreightFrontendListItem(BaseModel):
             status=freight.status,  # type: ignore[attr-defined]
             truck_id=freight.truck_id,  # type: ignore[attr-defined]
             driver_id=freight.driver_id,  # type: ignore[attr-defined]
+            km_inicial=float(km_inicial) if km_inicial is not None else None,
             created_at=freight.created_at.isoformat(),  # type: ignore[attr-defined]
             updated_at=freight.updated_at.isoformat(),  # type: ignore[attr-defined]
         )

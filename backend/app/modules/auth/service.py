@@ -32,12 +32,15 @@ from app.shared.exceptions.custom import (
     ConflictException,
     UnauthorizedException,
 )
+from app.shared.security.resource_access import get_driver_id_for_user
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
 
 
-def _build_user_response(user: User) -> AuthUserResponse:
+def _build_user_response(
+    user: User, *, driver_id: uuid.UUID | None = None
+) -> AuthUserResponse:
     return AuthUserResponse(
         id=user.id,
         email=user.email,
@@ -45,6 +48,7 @@ def _build_user_response(user: User) -> AuthUserResponse:
         role=role_to_frontend(user.role),
         tenant_id=str(user.tenant_id),
         branch_id=None,
+        driver_id=driver_id,
         permissions=permissions_for_role(user.role),
     )
 
@@ -67,17 +71,33 @@ class AuthService:
             DriverRepository(self._session, tenant_id),
         )
 
+    async def _resolve_driver_id(
+        self, user: User, *, known_driver_id: uuid.UUID | None = None
+    ) -> uuid.UUID | None:
+        if known_driver_id is not None:
+            return known_driver_id
+        if user.role != UserRole.MOTORISTA:
+            return None
+        return await get_driver_id_for_user(self._session, user)
+
     async def _issue_tokens(
-        self, user: User, device_info: str | None = None
+        self,
+        user: User,
+        device_info: str | None = None,
+        *,
+        driver_id: uuid.UUID | None = None,
     ) -> LoginResponse:
         access_token = create_access_token(user.id, user.role, tenant_id=user.tenant_id)
         raw_refresh, _ = create_refresh_token()
         _, token_repo, _ = self._repos_for(user.tenant_id)
         await token_repo.create(user.id, raw_refresh, device_info)
         await self._session.commit()
+        resolved_driver_id = await self._resolve_driver_id(
+            user, known_driver_id=driver_id
+        )
         return LoginResponse(
             tokens=self._make_token_response(access_token, raw_refresh),
-            user=_build_user_response(user),
+            user=_build_user_response(user, driver_id=resolved_driver_id),
         )
 
     async def login(
@@ -131,10 +151,11 @@ class AuthService:
             raise UnauthorizedException("Credenciais inválidas")
 
         log.info("driver_logged_in", user_id=str(user.id), driver_id=str(driver.id))
-        return await self._issue_tokens(user, device_info)
+        return await self._issue_tokens(user, device_info, driver_id=driver.id)
 
     async def get_me(self, user: User) -> AuthUserResponse:
-        return _build_user_response(user)
+        driver_id = await self._resolve_driver_id(user)
+        return _build_user_response(user, driver_id=driver_id)
 
     async def register_tenant(
         self,
@@ -203,9 +224,10 @@ class AuthService:
         await token_repo.create(user.id, raw_new, token.device_info)
         await self._session.commit()
 
+        driver_id = await self._resolve_driver_id(user)
         return LoginResponse(
             tokens=self._make_token_response(access_token, raw_new),
-            user=_build_user_response(user),
+            user=_build_user_response(user, driver_id=driver_id),
         )
 
     async def logout(self, raw_token: str) -> None:

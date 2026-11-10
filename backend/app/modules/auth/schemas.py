@@ -69,6 +69,7 @@ class AuthUserResponse(BaseModel):
     role: str
     tenant_id: str  # serialized UUID
     branch_id: str | None = None
+    driver_id: uuid.UUID | None = None
     permissions: list[str]
 
     model_config = {"from_attributes": True}

@@ -18,6 +18,8 @@ from app.modules.freights.schemas import (
     FreightCreate,
     FreightFrontendListItem,
     FreightFrontendRead,
+    FreightOdometerEnd,
+    FreightStartTrip,
     FreightStatusUpdate,
     FreightSummaryResponse,
     FreightUpdate,
@@ -214,3 +216,33 @@ async def add_freight_cost(
 ) -> FreightCostRead:
     service = FreightService(db, current_user.tenant_id)
     return await service.add_cost(freight_id, payload, current_user)  # type: ignore[return-value]
+
+
+@router.post("/{freight_id}/start-trip", response_model=FreightFrontendRead)
+async def start_freight_trip(
+    freight_id: uuid.UUID,
+    payload: FreightStartTrip,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FreightFrontendRead:
+    """Motorista (ou admin/operador) registra KM inicial e checklist para iniciar viagem."""
+    service = FreightService(db, current_user.tenant_id)
+    freight = await service.start_trip(freight_id, payload, current_user)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
+
+
+@router.post("/{freight_id}/odometer-end", response_model=FreightFrontendRead)
+async def end_freight_odometer(
+    freight_id: uuid.UUID,
+    payload: FreightOdometerEnd,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> FreightFrontendRead:
+    """Registra KM final do odômetro da viagem."""
+    service = FreightService(db, current_user.tenant_id)
+    freight = await service.end_odometer(freight_id, payload, current_user)
+    return FreightFrontendRead.from_orm(
+        freight, hide_financial=should_redact_freight_financials(current_user)
+    )
