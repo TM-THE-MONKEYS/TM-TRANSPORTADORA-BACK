@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import select
@@ -13,16 +14,24 @@ from app.modules.freights.schemas import (
     FreightCostCreate,
     FreightCostsSummaryItem,
     FreightCreate,
+    FreightOdometerEnd,
+    FreightStartTrip,
     FreightStopCreate,
     FreightUpdate,
 )
 from app.modules.users.models import User
 from app.shared.enums import FreightStatus, TruckStatus, UserRole
-from app.shared.exceptions.custom import BadRequestException, ForbiddenException, NotFoundException
+from app.shared.exceptions.custom import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
 from app.shared.pagination import PagedResponse, PageParams
 from app.shared.security.resource_access import (
     assert_freight_read_access,
     assert_freight_summary_access,
+    get_driver_id_for_user,
     resolve_freight_list_driver_filter,
     should_redact_freight_financials,
 )
@@ -83,6 +92,28 @@ class FreightService:
     def _check_write_access(self, user: User) -> None:
         if user.role not in (UserRole.ADMIN, UserRole.OPERADOR):
             raise ForbiddenException("Acesso negado")
+
+    async def _assert_trip_odometer_access(self, freight: Freight, user: User) -> None:
+        """Admin/operador ou motorista vinculado ao frete."""
+        if user.role in (UserRole.ADMIN, UserRole.OPERADOR):
+            return
+        if user.role != UserRole.MOTORISTA:
+            raise ForbiddenException("Acesso negado")
+        driver_id = await get_driver_id_for_user(self._session, user)
+        if not driver_id or freight.driver_id != driver_id:
+            raise ForbiddenException("Acesso negado a este frete")
+
+    async def _bump_truck_km_if_greater(self, truck_id: uuid.UUID | None, km: float) -> None:
+        if not truck_id:
+            return
+        from app.modules.trucks.models import Truck
+
+        truck = await self._session.get(Truck, truck_id)
+        if not truck or truck.tenant_id != self._tenant_id or truck.deleted_at is not None:
+            return
+        if km > float(truck.km_atual):
+            truck.km_atual = km
+            await self._session.flush()
 
     async def _sync_truck_status(self, truck_id: uuid.UUID | None) -> None:
         """Atualiza disponivel ↔ em_viagem conforme fretes ativos do caminhão.
@@ -383,31 +414,60 @@ class FreightService:
         }
 
     async def advance_status(self, freight_id: uuid.UUID, requesting_user: User) -> Freight:
-        self._check_write_access(requesting_user)
         freight = await self._repo.get_by_id(freight_id, for_update=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        await self._assert_trip_odometer_access(freight, requesting_user)
         if freight.status in _LEGACY_STATUSES:
             next_status = FreightStatus.EM_TRANSPORTE
         elif freight.status == FreightStatus.EM_TRANSPORTE:
             next_status = FreightStatus.ENTREGUE
         else:
             raise ForbiddenException("Frete já está no status final")
+        # Fretes com viagem iniciada exigem KM final antes da entrega.
+        if (
+            next_status == FreightStatus.ENTREGUE
+            and freight.km_inicial is not None
+            and freight.km_final is None
+        ):
+            raise BadRequestException(
+                "Registre o KM final antes de marcar o frete como entregue"
+            )
+        if (
+            next_status == FreightStatus.EM_TRANSPORTE
+            and freight.km_inicial is None
+            and requesting_user.role == UserRole.MOTORISTA
+        ):
+            raise BadRequestException(
+                "Inicie a viagem (KM inicial + checklist) antes de avançar o status"
+            )
         return await self._apply_status_change(freight, next_status, commit=True)
 
     async def update_status(
         self, freight_id: uuid.UUID, new_status: FreightStatus, requesting_user: User
     ) -> Freight:
-        self._check_write_access(requesting_user)
         freight = await self._repo.get_by_id(freight_id, for_update=True)
         if not freight:
             raise NotFoundException("Frete não encontrado")
+        # Admin/operador: escrita plena. Motorista: só frete vinculado.
+        if requesting_user.role in (UserRole.ADMIN, UserRole.OPERADOR):
+            pass
+        else:
+            await self._assert_trip_odometer_access(freight, requesting_user)
         is_admin = requesting_user.role == UserRole.ADMIN
         if new_status != freight.status and not _is_valid_status_transition(
             freight.status, new_status, is_admin=is_admin
         ):
             raise ForbiddenException(
                 f"Transição inválida: {freight.status.value} → {new_status.value}"
+            )
+        if (
+            new_status == FreightStatus.ENTREGUE
+            and freight.km_inicial is not None
+            and freight.km_final is None
+        ):
+            raise BadRequestException(
+                "Registre o KM final antes de marcar o frete como entregue"
             )
         if new_status == freight.status:
             freight = await self._repo.get_by_id(freight_id, with_relations=True)
@@ -565,3 +625,94 @@ class FreightService:
 
         await invalidate_tenant_aggregates_cache(self._tenant_id)
         return cost
+
+    async def start_trip(
+        self, freight_id: uuid.UUID, data: FreightStartTrip, user: User
+    ) -> Freight:
+        freight = await self._repo.get_by_id(freight_id, for_update=True)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        await self._assert_trip_odometer_access(freight, user)
+
+        if freight.km_inicial is not None:
+            raise ConflictException("Viagem já iniciada (KM inicial já registrado)")
+        if freight.status in _TERMINAL_STATUSES:
+            raise BadRequestException(
+                f"Não é possível iniciar viagem em frete {freight.status.value}"
+            )
+
+        if freight.truck_id:
+            from app.modules.trucks.models import Truck
+
+            truck = await self._session.get(Truck, freight.truck_id)
+            if truck and truck.tenant_id == self._tenant_id and truck.deleted_at is None:
+                if data.km_inicial < float(truck.km_atual):
+                    raise BadRequestException(
+                        f"KM inicial ({data.km_inicial}) não pode ser menor que "
+                        f"o odômetro atual do caminhão ({truck.km_atual})"
+                    )
+
+        now = datetime.now(timezone.utc)
+        freight.km_inicial = data.km_inicial
+        freight.check_docs = data.check_docs
+        freight.check_veiculo = data.check_veiculo
+        freight.check_carga = data.check_carga
+        freight.km_inicial_registrado_em = now
+        freight = await self._repo.update(freight)
+
+        if freight.status in _LEGACY_STATUSES:
+            freight = await self._apply_status_change(
+                freight, FreightStatus.EM_TRANSPORTE, commit=False
+            )
+        else:
+            await self._sync_truck_status(freight.truck_id)
+
+        await self._bump_truck_km_if_greater(freight.truck_id, data.km_inicial)
+        await self._session.commit()
+        from app.shared.cache.freight_summary import invalidate_tenant_aggregates_cache
+
+        await invalidate_tenant_aggregates_cache(self._tenant_id)
+        freight = await self._repo.get_by_id(freight_id, with_relations=True)
+        assert freight is not None
+        log.info(
+            "freight_trip_started",
+            freight_id=str(freight_id),
+            km_inicial=data.km_inicial,
+            user_id=str(user.id),
+            role=user.role.value,
+        )
+        return freight
+
+    async def end_odometer(
+        self, freight_id: uuid.UUID, data: FreightOdometerEnd, user: User
+    ) -> Freight:
+        freight = await self._repo.get_by_id(freight_id, for_update=True)
+        if not freight:
+            raise NotFoundException("Frete não encontrado")
+        await self._assert_trip_odometer_access(freight, user)
+
+        if freight.km_inicial is None:
+            raise BadRequestException("KM inicial ainda não registrado para este frete")
+        if data.km_final < float(freight.km_inicial):
+            raise BadRequestException(
+                f"KM final ({data.km_final}) não pode ser menor que "
+                f"o KM inicial ({freight.km_inicial})"
+            )
+
+        freight.km_final = data.km_final
+        freight.km_final_registrado_em = datetime.now(timezone.utc)
+        freight = await self._repo.update(freight)
+        await self._bump_truck_km_if_greater(freight.truck_id, data.km_final)
+        await self._session.commit()
+
+        freight = await self._repo.get_by_id(freight_id, with_relations=True)
+        assert freight is not None
+        log.info(
+            "freight_odometer_ended",
+            freight_id=str(freight_id),
+            km_inicial=freight.km_inicial,
+            km_final=data.km_final,
+            user_id=str(user.id),
+            role=user.role.value,
+        )
+        return freight

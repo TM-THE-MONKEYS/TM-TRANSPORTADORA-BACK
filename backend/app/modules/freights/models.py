@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, JSON, DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +38,17 @@ class Freight(TenantMixin, SoftDeleteMixin, BaseModel):
     data_entrega_real: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     distancia_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    km_inicial: Mapped[float | None] = mapped_column(Float, nullable=True)
+    km_final: Mapped[float | None] = mapped_column(Float, nullable=True)
+    km_inicial_registrado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    km_final_registrado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    check_docs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    check_veiculo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    check_carga: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     costs: Mapped[list["FreightCost"]] = relationship(
         back_populates="freight", cascade="all, delete-orphan", lazy="noload"

@@ -337,10 +337,11 @@ class FreightRepository(TenantBaseRepository[Freight]):
         truck_id: uuid.UUID,
         exclude_freight_id: uuid.UUID | None = None,
     ) -> bool:
-        """True if truck has a non-deleted freight in coleta/transporte (em viagem)."""
+        """True if truck has busy freight that already started (km_inicial set)."""
         query = self._base_query().where(
             Freight.truck_id == truck_id,
             Freight.status.in_((FreightStatus.EM_COLETA, FreightStatus.EM_TRANSPORTE)),
+            Freight.km_inicial.isnot(None),
         )
         if exclude_freight_id:
             query = query.where(Freight.id != exclude_freight_id)

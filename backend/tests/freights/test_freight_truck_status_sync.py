@@ -1,4 +1,7 @@
-"""Freight mutations must sync truck disponivel ↔ em_viagem on the backend."""
+"""Freight mutations must sync truck disponivel ↔ em_viagem on the backend.
+
+Truck only becomes em_viagem after freight has km_inicial (start-trip).
+"""
 from __future__ import annotations
 
 import uuid
@@ -11,6 +14,13 @@ from app.modules.clients.models import Client
 from app.modules.tenants.models import Tenant
 from app.modules.trucks.models import Truck
 from app.shared.enums import TruckStatus
+
+_START_PAYLOAD = {
+    "km_inicial": 1500.0,
+    "check_docs": True,
+    "check_veiculo": True,
+    "check_carga": True,
+}
 
 
 async def _seed_client_and_truck(
@@ -39,7 +49,7 @@ async def _seed_client_and_truck(
 
 
 @pytest.mark.asyncio
-async def test_create_freight_sets_truck_em_viagem(
+async def test_create_freight_does_not_set_truck_em_viagem_without_km(
     client: AsyncClient,
     admin_headers: dict[str, str],
     db_session: AsyncSession,
@@ -61,6 +71,44 @@ async def test_create_freight_sets_truck_em_viagem(
         headers=admin_headers,
     )
     assert response.status_code == 201, response.text
+
+    db_session.expire_all()
+    refreshed = await db_session.get(Truck, truck_id)
+    assert refreshed is not None
+    assert refreshed.status == TruckStatus.DISPONIVEL
+
+
+@pytest.mark.asyncio
+async def test_start_trip_sets_truck_em_viagem(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    db_client, truck = await _seed_client_and_truck(db_session, test_tenant)
+    truck_id = truck.id
+
+    create = await client.post(
+        "/api/v1/freights",
+        json={
+            "client_id": str(db_client.id),
+            "truck_id": str(truck_id),
+            "origem": {"logradouro": "Rua A", "cidade": "São Paulo", "estado": "SP"},
+            "destino": {"logradouro": "Rua B", "cidade": "Rio de Janeiro", "estado": "RJ"},
+            "valor_frete": 2000.0,
+            "status": "em_transporte",
+        },
+        headers=admin_headers,
+    )
+    assert create.status_code == 201, create.text
+    freight_id = create.json()["id"]
+
+    start = await client.post(
+        f"/api/v1/freights/{freight_id}/start-trip",
+        json=_START_PAYLOAD,
+        headers=admin_headers,
+    )
+    assert start.status_code == 200, start.text
 
     db_session.expire_all()
     refreshed = await db_session.get(Truck, truck_id)
@@ -92,6 +140,20 @@ async def test_advance_to_entregue_releases_truck(
     )
     assert create.status_code == 201, create.text
     freight_id = create.json()["id"]
+
+    start = await client.post(
+        f"/api/v1/freights/{freight_id}/start-trip",
+        json=_START_PAYLOAD,
+        headers=admin_headers,
+    )
+    assert start.status_code == 200, start.text
+
+    end = await client.post(
+        f"/api/v1/freights/{freight_id}/odometer-end",
+        json={"km_final": 1800.0},
+        headers=admin_headers,
+    )
+    assert end.status_code == 200, end.text
 
     advance = await client.post(
         f"/api/v1/freights/{freight_id}/advance-status",
@@ -131,6 +193,14 @@ async def test_sync_does_not_override_maintenance(
         headers=admin_headers,
     )
     assert response.status_code == 201, response.text
+    freight_id = response.json()["id"]
+
+    start = await client.post(
+        f"/api/v1/freights/{freight_id}/start-trip",
+        json=_START_PAYLOAD,
+        headers=admin_headers,
+    )
+    assert start.status_code == 200, start.text
 
     db_session.expire_all()
     refreshed = await db_session.get(Truck, truck_id)
