@@ -179,7 +179,8 @@ Copie `.env.example` para `.env` e preencha:
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Validade do refresh token | `7` |
 | `DATABASE_URL` | URL PostgreSQL async (`postgresql+asyncpg://...`) | *(obrigatório)* |
 | `SUPABASE_URL` | URL do projeto Supabase | *(opcional)* |
-| `SUPABASE_SERVICE_KEY` | Service role key (bypass RLS) | *(obrigatório em prod)* |
+| `SUPABASE_SECRET_KEY` | Secret key `sb_secret_…` (Dashboard → API Keys; bypass RLS) | *(obrigatório em prod p/ Storage)* |
+| `SUPABASE_SERVICE_KEY` | Legacy JWT `service_role` (opcional se já tiver Secret key) | — |
 | `REDIS_URL` | URL do Redis | `redis://localhost:6379/0` |
 | `CELERY_BROKER_URL` | Broker Celery (mesmo Redis) | `redis://localhost:6379/0` |
 | `CORS_ORIGINS` | Origens permitidas (separadas por vírgula) | `http://localhost:3000` |

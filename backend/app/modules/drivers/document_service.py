@@ -13,17 +13,21 @@ from app.modules.drivers.repository import DriverRepository
 from app.modules.users.models import User
 from app.shared.enums import DriverDocumentType, UserRole
 from app.shared.exceptions.custom import (
+    AppException,
     BadRequestException,
     ForbiddenException,
     NotFoundException,
 )
 from app.shared.security.resource_access import assert_catalog_read_access
+from app.shared.storage.driver_documents_storage import (
+    delete_driver_document,
+    read_driver_document_bytes,
+    save_driver_document_bytes,
+)
+from app.shared.storage.errors import StorageBackendError, StorageObjectNotFoundError
 from app.shared.storage.local_files import (
     ALLOWED_DRIVER_DOCUMENT_TYPES,
-    delete_storage_file,
     normalize_driver_document_content_type,
-    resolve_storage_path,
-    save_driver_document_bytes,
 )
 
 log = structlog.get_logger(__name__)
@@ -75,9 +79,24 @@ class DriverDocumentService:
                 "Tipo de arquivo não permitido. Use JPG, PNG, WEBP ou PDF."
             )
 
-        storage_key = save_driver_document_bytes(
-            self._tenant_id, driver_id, filename, content
-        )
+        try:
+            storage_key = await save_driver_document_bytes(
+                self._tenant_id,
+                driver_id,
+                filename,
+                content,
+                content_type,
+            )
+        except StorageBackendError as exc:
+            log.error(
+                "driver_document_storage_save_failed",
+                driver_id=str(driver_id),
+                operation=exc.operation,
+                storage_path=exc.storage_path,
+            )
+            raise AppException(
+                "Não foi possível salvar o arquivo. Tente novamente."
+            ) from exc
 
         document = DriverDocument(
             driver_id=driver_id,
@@ -112,10 +131,22 @@ class DriverDocumentService:
         document = await self._repo.get_for_driver(document_id, driver_id)
         if not document:
             raise NotFoundException("Documento não encontrado")
-        path = resolve_storage_path(document.storage_path)
-        if not path.is_file():
+        try:
+            data = await read_driver_document_bytes(document.storage_path)
+        except StorageObjectNotFoundError:
             raise NotFoundException("Arquivo não encontrado no storage")
-        return document, path.read_bytes()
+        except StorageBackendError as exc:
+            log.error(
+                "driver_document_storage_read_failed",
+                driver_id=str(driver_id),
+                document_id=str(document_id),
+                operation=exc.operation,
+                storage_path=exc.storage_path,
+            )
+            raise AppException(
+                "Não foi possível carregar o arquivo. Tente novamente."
+            ) from exc
+        return document, data
 
     async def delete(
         self, driver_id: uuid.UUID, document_id: uuid.UUID, deleted_by: User
@@ -124,7 +155,19 @@ class DriverDocumentService:
         document = await self._repo.get_for_driver(document_id, driver_id)
         if not document:
             raise NotFoundException("Documento não encontrado")
-        delete_storage_file(document.storage_path)
+        try:
+            await delete_driver_document(document.storage_path)
+        except StorageBackendError as exc:
+            log.error(
+                "driver_document_storage_delete_failed",
+                driver_id=str(driver_id),
+                document_id=str(document_id),
+                operation=exc.operation,
+                storage_path=exc.storage_path,
+            )
+            raise AppException(
+                "Não foi possível remover o arquivo. Tente novamente."
+            ) from exc
         await self._repo.soft_delete(document)
 
         driver = await self._driver_repo.get_by_id(driver_id)
