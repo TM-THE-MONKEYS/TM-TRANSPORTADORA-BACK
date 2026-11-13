@@ -36,10 +36,24 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/tm_transportadora"
     database_url_sync: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/tm_transportadora"
 
-    # Supabase
+    # Supabase (Postgres pooler + Storage REST para documentos de motorista)
     supabase_url: str = ""
     supabase_anon_key: str = ""
+    # Legacy JWT service_role (eyJ…). Preferir SUPABASE_SECRET_KEY (sb_secret_…).
     supabase_service_key: str = ""
+    # Nova API key secreta do Dashboard (Settings → API Keys → Secret key).
+    supabase_secret_key: str = ""
+    # Bucket privado no Supabase Storage (ex.: tm-driver-documents)
+    supabase_storage_bucket: str = "tm-driver-documents"
+    # local | supabase | auto — auto usa Supabase se URL + secret/service key válidos
+    storage_backend: Literal["local", "supabase", "auto"] = "auto"
+
+    def supabase_elevated_key(self) -> str:
+        """Secret key nova (sb_secret_) ou legacy service_role JWT."""
+        secret = (self.supabase_secret_key or "").strip()
+        if secret:
+            return secret
+        return (self.supabase_service_key or "").strip()
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -68,9 +82,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
 
-    # Uploads (documentos motorista, etc.)
-    # Em produção no Railway: montar volume persistente em /data/uploads e
-    # definir UPLOAD_DIR=/data/uploads (evita perda no redeploy).
+    # Uploads locais (fallback quando STORAGE_BACKEND=local ou auto sem Supabase)
+    # Em produção com Supabase Storage, UPLOAD_DIR só importa para testes/local.
+    # Se ainda usar disco no Railway: volume em /data/uploads.
     upload_dir: str = "uploads"
     upload_max_bytes: int = 5 * 1024 * 1024
 
